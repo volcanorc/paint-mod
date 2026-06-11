@@ -1,0 +1,10 @@
+build/
+.gradle/
+work/tools/
+outputs/
+*.jar
+*.class
+
+.idea/
+.vscode/
+*.log

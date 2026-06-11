@@ -1,0 +1,9 @@
+{
+  "category.artmap_color_assistant": "ArtMap Color Assistant",
+  "key.artmap_color_assistant.pause_resume": "Pause/Resume Painting",
+  "key.artmap_color_assistant.back": "Back One Pixel",
+  "key.artmap_color_assistant.skip": "Skip One Pixel",
+  "key.artmap_color_assistant.stop": "Stop Painting",
+  "key.artmap_color_assistant.status": "Painting Status",
+  "key.artmap_color_assistant.advance": "Confirm Advance"
+}
