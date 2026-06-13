@@ -4,7 +4,10 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,9 +18,16 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
 
     private ConfigManager configManager;
     private SessionController controller;
+    private CalibrationManager calibrationManager;
+    private CalibrationMarkerRenderer calibrationMarkerRenderer;
+    private AutoPainter autoPainter;
+    private BatchManager batchManager;
+    private PostPaintWorkflow postPaintWorkflow;
+    private GuiClickRecorder guiClickRecorder;
     private HashCommandHandler commandHandler;
     private ClickTracker clickTracker;
     private KeybindHandler keybindHandler;
+    private boolean openGuiPending;
 
     @Override
     public void onInitializeClient() {
@@ -28,7 +38,15 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
 
         InventoryHelper inventoryHelper = new InventoryHelper(client);
         controller = new SessionController(configManager, new ImageLoader(), inventoryHelper, new ColorMatcher());
-        commandHandler = new HashCommandHandler(configManager, controller);
+        calibrationManager = new CalibrationManager(client, configManager.calibrationsPath());
+        calibrationManager.setLastCalibrationName(configManager.config().selectedCalibrationName());
+        calibrationMarkerRenderer = new CalibrationMarkerRenderer(client, calibrationManager);
+        calibrationMarkerRenderer.register();
+        autoPainter = new AutoPainter(client, controller, calibrationManager, configManager.config());
+        postPaintWorkflow = new PostPaintWorkflow(client, calibrationManager);
+        batchManager = new BatchManager(configManager, controller, autoPainter, postPaintWorkflow);
+        guiClickRecorder = new GuiClickRecorder(client, configManager);
+        commandHandler = new HashCommandHandler(configManager, controller, autoPainter, calibrationManager, batchManager, guiClickRecorder);
         clickTracker = new ClickTracker(client);
         keybindHandler = new KeybindHandler();
         keybindHandler.register();
@@ -42,7 +60,7 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
-        new HudOverlay(client, controller).register();
+        new HudOverlay(client, controller, autoPainter, calibrationManager, calibrationMarkerRenderer).register();
         LOGGER.info("ArtMapColorAssistant initialized");
     }
 
@@ -58,11 +76,27 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         return true;
     }
 
+    public static void requestGuiOpen() {
+        if (instance != null) {
+            instance.requestOpenGui();
+        }
+    }
+
     private void tick(MinecraftClient client) {
         SessionController.MessageSink sink = sink();
+        if (openGuiPending && !(client.currentScreen instanceof ChatScreen)) {
+            openGuiPending = false;
+            client.setScreen(new PaintingControlScreen(commandHandler, autoPainter, calibrationManager, configManager, batchManager));
+        }
         controller.tick(sink);
-        keybindHandler.tick(controller, sink);
-        clickTracker.tick(configManager.config(), commandHandler.confirmMode(), controller, sink);
+        autoPainter.tick(configManager.config(), sink);
+        batchManager.tick(sink);
+        keybindHandler.tick(controller, autoPainter, calibrationManager, calibrationMarkerRenderer, sink);
+        clickTracker.tick(configManager.config(), commandHandler.confirmMode(), controller, calibrationManager, guiClickRecorder, sink);
+    }
+
+    void requestOpenGui() {
+        openGuiPending = true;
     }
 
     private SessionController.MessageSink sink() {
@@ -76,15 +110,29 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
             public void error(String message) {
                 sendError(Text.literal(message));
             }
+
+            @Override
+            public void info(Text message) {
+                sendInfo(message);
+            }
+
+            @Override
+            public void error(Text message) {
+                sendError(message);
+            }
         };
     }
 
     private void sendInfo(String message) {
+        sendInfo(Text.literal(message));
+    }
+
+    private void sendInfo(Text message) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player != null) {
-            client.player.sendMessage(Text.literal("[ArtMap] " + message), false);
+            client.player.sendMessage(prefix().append(message.copy().formatted(Formatting.YELLOW)), false);
         } else {
-            LOGGER.info(message);
+            LOGGER.info(message.getString());
         }
     }
 
@@ -92,9 +140,13 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         MinecraftClient client = MinecraftClient.getInstance();
         String text = message.getString();
         if (client.player != null) {
-            client.player.sendMessage(Text.literal("[ArtMap] " + text), false);
+            client.player.sendMessage(prefix().append(message.copy().formatted(Formatting.RED)), false);
         } else {
             LOGGER.warn(text);
         }
+    }
+
+    private MutableText prefix() {
+        return Text.literal("[ArtMap] ").formatted(Formatting.GOLD);
     }
 }

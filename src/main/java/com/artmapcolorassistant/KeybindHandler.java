@@ -13,6 +13,8 @@ public final class KeybindHandler {
     private KeyBinding stop;
     private KeyBinding status;
     private KeyBinding advance;
+    private KeyBinding toggleCalibrationMarkers;
+    private KeyBinding undoCalibrationPoint;
 
     public void register() {
         pauseResume = register("key.artmap_color_assistant.pause_resume", GLFW.GLFW_KEY_P);
@@ -21,10 +23,21 @@ public final class KeybindHandler {
         stop = register("key.artmap_color_assistant.stop", GLFW.GLFW_KEY_O);
         status = register("key.artmap_color_assistant.status", GLFW.GLFW_KEY_I);
         advance = register("key.artmap_color_assistant.advance", GLFW.GLFW_KEY_APOSTROPHE);
+        toggleCalibrationMarkers = register("key.artmap_color_assistant.toggle_calibration_markers", GLFW.GLFW_KEY_K);
+        undoCalibrationPoint = register("key.artmap_color_assistant.undo_calibration_point", GLFW.GLFW_KEY_BACKSPACE);
     }
 
-    public void tick(SessionController controller, SessionController.MessageSink sink) {
+    public void tick(SessionController controller, AutoPainter autoPainter, CalibrationManager calibrationManager,
+                     CalibrationMarkerRenderer markerRenderer, SessionController.MessageSink sink) {
         while (pauseResume.wasPressed()) {
+            if (autoPainter.running()) {
+                if (autoPainter.paused()) {
+                    autoPainter.resume(sink);
+                } else {
+                    autoPainter.pause(sink);
+                }
+                continue;
+            }
             PaintSession session = controller.session();
             if (session != null && session.paused()) {
                 controller.resume(sink);
@@ -39,13 +52,26 @@ public final class KeybindHandler {
             controller.skip(sink);
         }
         while (stop.wasPressed()) {
-            controller.stop(sink);
+            if (autoPainter.running()) {
+                autoPainter.emergencyStop(sink);
+            } else {
+                controller.stop(sink);
+            }
         }
         while (status.wasPressed()) {
             controller.status(sink);
+            if (autoPainter.running()) {
+                sink.info(autoPainter.status());
+            }
         }
         while (advance.wasPressed()) {
             controller.onAdvanceInput(sink);
+        }
+        while (toggleCalibrationMarkers.wasPressed()) {
+            markerRenderer.toggle(sink);
+        }
+        while (undoCalibrationPoint.wasPressed()) {
+            calibrationManager.undoLastRecordingPoint(sink);
         }
     }
 

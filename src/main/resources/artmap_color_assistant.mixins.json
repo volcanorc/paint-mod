@@ -3,7 +3,10 @@
   "package": "com.artmapcolorassistant.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "ChatScreenMixin"
+    "ChatScreenMixin",
+    "GameRendererInvoker",
+    "HandledScreenInvoker",
+    "MinecraftClientInvoker"
   ],
   "injectors": {
     "defaultRequire": 1

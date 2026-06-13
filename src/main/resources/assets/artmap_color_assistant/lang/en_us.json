@@ -5,5 +5,7 @@
   "key.artmap_color_assistant.skip": "Skip One Pixel",
   "key.artmap_color_assistant.stop": "Stop Painting",
   "key.artmap_color_assistant.status": "Painting Status",
-  "key.artmap_color_assistant.advance": "Confirm Advance"
+  "key.artmap_color_assistant.advance": "Confirm Advance",
+  "key.artmap_color_assistant.toggle_calibration_markers": "Toggle Calibration Markers",
+  "key.artmap_color_assistant.undo_calibration_point": "Undo Calibration Point"
 }

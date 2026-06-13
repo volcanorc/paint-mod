@@ -14,7 +14,9 @@ public final class ClickTracker {
         this.client = client;
     }
 
-    public void tick(ConfigManager.Config config, boolean confirmMode, SessionController controller, SessionController.MessageSink sink) {
+    public void tick(ConfigManager.Config config, boolean confirmMode, SessionController controller,
+                     CalibrationManager calibrationManager, GuiClickRecorder guiClickRecorder,
+                     SessionController.MessageSink sink) {
         long handle = client.getWindow().getHandle();
         boolean left = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
         boolean right = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS;
@@ -23,7 +25,20 @@ public final class ClickTracker {
         leftDown = left;
         rightDown = right;
 
-        if (confirmMode || client.player == null || client.currentScreen instanceof ChatScreen || client.currentScreen != null) {
+        if (guiClickRecorder.tick(leftPressed, rightPressed, sink)) {
+            return;
+        }
+
+        if (client.player == null || client.currentScreen instanceof ChatScreen || client.currentScreen != null) {
+            return;
+        }
+        if (calibrationManager.recording()) {
+            if (rightPressed) {
+                calibrationManager.recordClick(sink);
+            }
+            return;
+        }
+        if (confirmMode) {
             return;
         }
         if (config.onlyAdvanceWhenCrosshairTargetExists()

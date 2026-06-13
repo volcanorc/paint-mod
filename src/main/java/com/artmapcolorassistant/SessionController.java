@@ -1,9 +1,13 @@
 package com.artmapcolorassistant;
 
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public final class SessionController {
@@ -29,7 +33,11 @@ public final class SessionController {
         return session != null && !session.stopped();
     }
 
-    public void start(String filename, MessageSink sink) {
+    public boolean hasPendingInventorySwap() {
+        return inventoryHelper.hasPendingSwap();
+    }
+
+    public boolean start(String filename, MessageSink sink) {
         try {
             ConfigManager.Config config = configManager.config();
             ImageLoader.LoadedImage image = imageLoader.load(configManager.importsPath(), filename, config.canvasWidth(), config.canvasHeight());
@@ -39,8 +47,10 @@ public final class SessionController {
             session = new PaintSession(filename, steps, palette);
             sink.info("Started " + filename + " with " + steps.size() + " steps and " + palette.size() + " usable colors.");
             switchCurrentNow(sink);
+            return true;
         } catch (ImageLoader.ImageLoadException | ColorMatcher.MatchException e) {
             sink.error(e.getMessage());
+            return false;
         }
     }
 
@@ -53,21 +63,87 @@ public final class SessionController {
             List<PaintStep> steps = colorMatcher.convert(image, config, palette);
             Map<ArtMapColor, Long> counts = colorMatcher.counts(steps);
             long skipped = steps.stream().filter(PaintStep::skip).count();
-            sink.info("Dryrun " + filename + ": " + palette.size() + " usable colors, " + skipped + " transparent skips.");
+            sink.info("Dryrun " + filename + ": " + palette.size() + " usable colors, " + skipped
+                    + " transparent skips, matchMode=" + config.colorMatchMode() + ".");
             String top = counts.entrySet().stream()
                     .sorted(Map.Entry.<ArtMapColor, Long>comparingByValue().reversed())
                     .limit(8)
-                    .map(entry -> entry.getKey().name() + "=" + entry.getValue())
+                    .map(entry -> entry.getKey().name() + "/" + entry.getKey().item() + "=" + entry.getValue())
                     .collect(Collectors.joining(", "));
             if (!top.isBlank()) {
-                sink.info("Top matched colors: " + top);
+                sink.info("Matched item counts: " + top);
             }
+            reportUnusedAvailableReds(palette, counts, sink);
+            reportRedCollapseWarning(image, palette, counts, sink);
             var tools = colorMatcher.detectedTools(config, inventory);
             if (!tools.isEmpty()) {
                 sink.info("Detected tools: " + tools.stream().map(ArtMapColor::name).collect(Collectors.joining(", ")));
             }
         } catch (ImageLoader.ImageLoadException | ColorMatcher.MatchException e) {
             sink.error(e.getMessage());
+        }
+    }
+
+    public void paletteStatus(MessageSink sink) {
+        ConfigManager.Config config = configManager.config();
+        InventoryHelper.InventorySnapshot inventory = inventoryHelper.scan();
+        List<ArtMapColor> palette = colorMatcher.buildMatchingPalette(config, inventory);
+        long configuredTools = config.effectiveArtMapColors().stream().filter(ArtMapColor::tool).count();
+        long inventoryMatches = config.effectiveArtMapColors().stream()
+                .filter(color -> colorAvailable(color, inventory.availableItemIds()))
+                .count();
+        sink.info("Palette status: configured=" + config.artMapColors().size()
+                + " effective=" + config.effectiveArtMapColors().size()
+                + " usableNow=" + palette.size()
+                + " inInventory=" + inventoryMatches
+                + " toolsConfigured=" + configuredTools
+                + " includeTools=" + config.includeToolsInColorMatching()
+                + " inventoryOnly=" + config.useOnlyInventoryAvailableColors()
+                + " matchMode=" + config.colorMatchMode()
+                + " serverOverrides=" + config.serverColorOverridesEnabled()
+                + " applied=" + configManager.serverColorOverridesApplied()
+                + " skipped=" + configManager.serverColorOverridesSkipped() + ".");
+    }
+
+    public void paletteReds(MessageSink sink) {
+        ConfigManager.Config config = configManager.config();
+        InventoryHelper.InventorySnapshot inventory = inventoryHelper.scan();
+        Set<Identifier> available = inventory.availableItemIds();
+        List<ArtMapColor> reds = config.effectiveArtMapColors().stream()
+                .filter(color -> !color.tool() || config.includeToolsInColorMatching())
+                .filter(colorMatcher::isReddish)
+                .filter(color -> colorAvailable(color, available))
+                .sorted(Comparator.comparing(ArtMapColor::name))
+                .toList();
+        if (reds.isEmpty()) {
+            sink.error("No red/pink/maroon ArtMap color items were found in hotbar/main inventory.");
+            return;
+        }
+        sink.info("Available red-ish ArtMap colors:");
+        for (ArtMapColor color : reds) {
+            sink.info(color.name() + " " + color.item() + " rgb=" + RgbUtil.toHex(color.rgb()));
+        }
+    }
+
+    public void paletteWhy(String hex, MessageSink sink) {
+        int rgb;
+        try {
+            rgb = RgbUtil.parseHex(hex);
+        } catch (IllegalArgumentException e) {
+            sink.error("Usage: #painting palette why <hex>, example #painting palette why #AA2222");
+            return;
+        }
+        ConfigManager.Config config = configManager.config();
+        InventoryHelper.InventorySnapshot inventory = inventoryHelper.scan();
+        Set<Identifier> available = inventory.availableItemIds();
+        List<ColorMatcher.ColorDistance> nearest = colorMatcher.nearestColors(rgb, config.effectiveArtMapColors(), config.colorMatchMode(), 8);
+        sink.info("Nearest configured colors for " + RgbUtil.toHex(rgb) + " using " + config.colorMatchMode() + ":");
+        for (ColorMatcher.ColorDistance entry : nearest) {
+            ArtMapColor color = entry.color();
+            sink.info(color.name() + " " + color.item()
+                    + " rgb=" + RgbUtil.toHex(color.rgb())
+                    + " distance=" + String.format("%.2f", entry.distance())
+                    + " inventory=" + (colorAvailable(color, available) ? "yes" : "no"));
         }
     }
 
@@ -169,6 +245,27 @@ public final class SessionController {
         switchDelayTicks = 2;
     }
 
+    public void autoAdvanceAfterClick(MessageSink sink) {
+        if (session == null || session.paused() || session.stopped()) {
+            return;
+        }
+        if (!session.advance()) {
+            finish(sink);
+        }
+    }
+
+    public void autoAdvanceAfterDrag(int count, MessageSink sink) {
+        if (session == null || session.paused() || session.stopped()) {
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            if (!session.advance()) {
+                finish(sink);
+                return;
+            }
+        }
+    }
+
     public void tick(MessageSink sink) {
         if (inventoryHelper.hasPendingSwap()) {
             InventoryHelper.SwitchResult result = inventoryHelper.tickPendingSwap();
@@ -206,6 +303,13 @@ public final class SessionController {
         }
     }
 
+    public boolean currentItemStillAvailable() {
+        if (session == null || session.currentStep() == null || session.currentStep().matchedColor() == null) {
+            return true;
+        }
+        return inventoryHelper.itemExists(session.currentStep().matchedColor());
+    }
+
     private void pauseForWarning(String warning, MessageSink sink) {
         if (session != null) {
             session.pause();
@@ -237,9 +341,52 @@ public final class SessionController {
                 + " " + step.matchedColor().name() + " " + step.item();
     }
 
+    private void reportUnusedAvailableReds(List<ArtMapColor> palette, Map<ArtMapColor, Long> counts, MessageSink sink) {
+        String unused = palette.stream()
+                .filter(colorMatcher::isReddish)
+                .filter(color -> !counts.containsKey(color))
+                .sorted(Comparator.comparing(ArtMapColor::name))
+                .map(color -> color.name() + "/" + color.item() + " " + RgbUtil.toHex(color.rgb()))
+                .collect(Collectors.joining(", "));
+        if (!unused.isBlank()) {
+            sink.info("Unused available red-ish colors: " + unused);
+        }
+    }
+
+    private void reportRedCollapseWarning(ImageLoader.LoadedImage image, List<ArtMapColor> palette,
+                                          Map<ArtMapColor, Long> counts, MessageSink sink) {
+        long redPixels = 0;
+        for (int argb : image.argb()) {
+            int alpha = (argb >>> 24) & 0xFF;
+            if (alpha > configManager.config().alphaThreshold() && RgbUtil.isReddish(argb & 0xFFFFFF)) {
+                redPixels++;
+            }
+        }
+        if (redPixels < image.argb().length / 4L) {
+            return;
+        }
+        long matchedRedColors = counts.keySet().stream().filter(colorMatcher::isReddish).count();
+        long availableRedColors = palette.stream().filter(colorMatcher::isReddish).count();
+        if (availableRedColors >= 4 && matchedRedColors <= 3) {
+            sink.error("Red-heavy image matched only " + matchedRedColors + " red-ish colors. Use #painting palette why <hex> or try colorMatchMode PERCEPTUAL.");
+        }
+    }
+
+    private boolean colorAvailable(ArtMapColor color, Set<Identifier> available) {
+        return available.contains(color.item()) || (color.legacyItem() != null && available.contains(color.legacyItem()));
+    }
+
     public interface MessageSink {
         void info(String message);
 
         void error(String message);
+
+        default void info(Text message) {
+            info(message.getString());
+        }
+
+        default void error(Text message) {
+            error(message.getString());
+        }
     }
 }

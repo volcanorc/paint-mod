@@ -27,7 +27,10 @@ public final class ConfigManager {
     private Config config = Config.defaults();
     private final Path configPath = FabricLoader.getInstance().getConfigDir().resolve("artmap_color_assistant.json");
     private final Path importsPath = FabricLoader.getInstance().getGameDir().resolve("artmap_color_assistant").resolve("imports");
+    private final Path calibrationsPath = FabricLoader.getInstance().getGameDir().resolve("artmap_color_assistant").resolve("calibrations");
     private final List<String> warnings = new ArrayList<>();
+    private int serverColorOverridesApplied;
+    private int serverColorOverridesSkipped;
 
     public Config config() {
         return config;
@@ -37,8 +40,20 @@ public final class ConfigManager {
         return importsPath;
     }
 
+    public Path calibrationsPath() {
+        return calibrationsPath;
+    }
+
     public List<String> warnings() {
         return List.copyOf(warnings);
+    }
+
+    public int serverColorOverridesApplied() {
+        return serverColorOverridesApplied;
+    }
+
+    public int serverColorOverridesSkipped() {
+        return serverColorOverridesSkipped;
     }
 
     public void load(Consumer<Text> warningSink) {
@@ -46,6 +61,7 @@ public final class ConfigManager {
         try {
             Files.createDirectories(configPath.getParent());
             Files.createDirectories(importsPath);
+            Files.createDirectories(calibrationsPath);
             if (Files.notExists(configPath)) {
                 config = Config.defaults();
                 save();
@@ -54,6 +70,7 @@ public final class ConfigManager {
                 JsonObject root = GSON.fromJson(reader, JsonObject.class);
                 config = parse(root);
             }
+            save();
         } catch (Exception e) {
             warn("Failed to load ArtMapColorAssistant config, using defaults: " + e.getMessage(), warningSink);
             config = Config.defaults();
@@ -79,8 +96,49 @@ public final class ConfigManager {
         TransparentPixelMode transparentPixelMode = TransparentPixelMode.fromString(stringValue(root, "transparentPixelMode", defaults.transparentPixelMode.name()));
         boolean debug = boolValue(root, "debug", defaults.debug);
         boolean useOnlyInventoryAvailableColors = boolValue(root, "useOnlyInventoryAvailableColors", defaults.useOnlyInventoryAvailableColors);
+        ColorMatchMode colorMatchMode = ColorMatchMode.fromString(stringValue(root, "colorMatchMode", defaults.colorMatchMode.name()));
         boolean includeToolsInColorMatching = boolValue(root, "includeToolsInColorMatching", defaults.includeToolsInColorMatching);
         boolean confirmMode = boolValue(root, "confirmMode", defaults.confirmMode);
+        int autoPaintDefaultDelayTicks = Math.max(1, intValue(root, "autoPaintDefaultDelayTicks", defaults.autoPaintDefaultDelayTicks));
+        int autoPaintMinDelayTicks = Math.max(1, intValue(root, "autoPaintMinDelayTicks", defaults.autoPaintMinDelayTicks));
+        if (autoPaintMinDelayTicks == 20) {
+            autoPaintMinDelayTicks = defaults.autoPaintMinDelayTicks;
+        }
+        AutoClickButton autoPaintClickButton = AutoClickButton.fromString(stringValue(root, "autoPaintClickButton", defaults.autoPaintClickButton.name()));
+        int autoAimSettleTicks = Math.max(0, intValue(root, "autoAimSettleTicks", defaults.autoAimSettleTicks));
+        double autoAimToleranceDegrees = Math.max(0.05D, doubleValue(root, "autoAimToleranceDegrees", defaults.autoAimToleranceDegrees));
+        boolean autoRequireCalibration = boolValue(root, "autoRequireCalibration", defaults.autoRequireCalibration);
+        boolean autoLockCameraDuringAuto = boolValue(root, "autoLockCameraDuringAuto", defaults.autoLockCameraDuringAuto);
+        boolean autoDragSameColorRuns = boolValue(root, "autoDragSameColorRuns", defaults.autoDragSameColorRuns);
+        int autoDragMinRunLength = Math.max(2, intValue(root, "autoDragMinRunLength", defaults.autoDragMinRunLength));
+        int autoDragPixelTicks = Math.max(1, intValue(root, "autoDragPixelTicks", defaults.autoDragPixelTicks));
+        if (autoDragPixelTicks == 1) {
+            autoDragPixelTicks = defaults.autoDragPixelTicks;
+        }
+        boolean autoDragRequireExactCalibration = boolValue(root, "autoDragRequireExactCalibration", defaults.autoDragRequireExactCalibration);
+        int autoDragStartHoldTicks = Math.max(0, intValue(root, "autoDragStartHoldTicks", defaults.autoDragStartHoldTicks));
+        int autoDragEndHoldTicks = Math.max(0, intValue(root, "autoDragEndHoldTicks", defaults.autoDragEndHoldTicks));
+        String selectedCalibrationName = sanitizeCalibrationName(stringValue(root, "selectedCalibrationName", defaults.selectedCalibrationName));
+        boolean serverColorOverridesEnabled = boolValue(root, "serverColorOverridesEnabled", defaults.serverColorOverridesEnabled);
+        boolean batchAutoStartAfterContinue = boolValue(root, "batchAutoStartAfterContinue", defaults.batchAutoStartAfterContinue);
+        int batchDefaultSpeedTicks = Math.max(1, intValue(root, "batchDefaultSpeedTicks", defaults.batchDefaultSpeedTicks));
+        boolean batchEnableDrag = boolValue(root, "batchEnableDrag", defaults.batchEnableDrag);
+        boolean postPaintAutomationEnabled = boolValue(root, "postPaintAutomationEnabled", defaults.postPaintAutomationEnabled);
+        int postPaintSaveHotbarSlot = clamp(intValue(root, "postPaintSaveHotbarSlot", defaults.postPaintSaveHotbarSlot), 0, 8);
+        int postPaintFinishedHotbarSlot = clamp(intValue(root, "postPaintFinishedHotbarSlot", defaults.postPaintFinishedHotbarSlot), 0, 8);
+        int postPaintBlankCanvasHotbarSlot = clamp(intValue(root, "postPaintBlankCanvasHotbarSlot", defaults.postPaintBlankCanvasHotbarSlot), 0, 8);
+        int postPaintAimCalibrationIndex = Math.max(0, intValue(root, "postPaintAimCalibrationIndex", defaults.postPaintAimCalibrationIndex));
+        String postPaintVaultCommand = stringValue(root, "postPaintVaultCommand", defaults.postPaintVaultCommand);
+        int postPaintSaveSelectDelayTicks = Math.max(0, intValue(root, "postPaintSaveSelectDelayTicks", defaults.postPaintSaveSelectDelayTicks));
+        int postPaintSaveAimSettleTicks = Math.max(0, intValue(root, "postPaintSaveAimSettleTicks", defaults.postPaintSaveAimSettleTicks));
+        int postPaintRenameOpenDelayTicks = Math.max(0, intValue(root, "postPaintRenameOpenDelayTicks", defaults.postPaintRenameOpenDelayTicks));
+        int postPaintRightClickRetries = Math.max(0, intValue(root, "postPaintRightClickRetries", defaults.postPaintRightClickRetries));
+        boolean postPaintFunJumpsEnabled = boolValue(root, "postPaintFunJumpsEnabled", defaults.postPaintFunJumpsEnabled);
+        int postPaintFunJumpCount = Math.max(0, intValue(root, "postPaintFunJumpCount", defaults.postPaintFunJumpCount));
+        int postPaintFunJumpPressTicks = Math.max(1, intValue(root, "postPaintFunJumpPressTicks", defaults.postPaintFunJumpPressTicks));
+        int postPaintFunJumpGapTicks = Math.max(0, intValue(root, "postPaintFunJumpGapTicks", defaults.postPaintFunJumpGapTicks));
+        RecordedClickPoint postPaintRenameClickPoint = parseClickPoint(root, "postPaintRenameClickPoint");
+        RecordedClickPoint postPaintPv2ClickPoint = parseClickPoint(root, "postPaintPv2ClickPoint");
 
         List<ArtMapColor> colors = new ArrayList<>();
         JsonArray array = root.has("artMapColors") && root.get("artMapColors").isJsonArray()
@@ -98,10 +156,42 @@ public final class ConfigManager {
         if (colors.isEmpty()) {
             colors = defaults.artMapColors;
         }
+        List<ServerColorOverride> serverColorOverrides = new ArrayList<>();
+        JsonArray overrideArray = root.has("serverColorOverrides") && root.get("serverColorOverrides").isJsonArray()
+                ? root.getAsJsonArray("serverColorOverrides")
+                : defaultServerColorOverrideJson();
+        serverColorOverridesSkipped = 0;
+        for (JsonElement element : overrideArray) {
+            if (!element.isJsonObject()) {
+                serverColorOverridesSkipped++;
+                continue;
+            }
+            ServerColorOverride override = parseServerColorOverride(element.getAsJsonObject());
+            if (override == null) {
+                serverColorOverridesSkipped++;
+            } else {
+                serverColorOverrides.add(override);
+            }
+        }
+        OverrideResult overrideResult = applyServerColorOverrides(colors, serverColorOverridesEnabled, serverColorOverrides);
+        serverColorOverridesApplied = overrideResult.applied();
         return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
                 advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
                 alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors,
-                includeToolsInColorMatching, confirmMode, List.copyOf(colors));
+                colorMatchMode, includeToolsInColorMatching, confirmMode, autoPaintDefaultDelayTicks,
+                autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, autoDragSameColorRuns,
+                autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                autoDragStartHoldTicks, autoDragEndHoldTicks, selectedCalibrationName,
+                serverColorOverridesEnabled, List.copyOf(serverColorOverrides),
+                batchAutoStartAfterContinue, batchDefaultSpeedTicks, batchEnableDrag,
+                postPaintAutomationEnabled, postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot,
+                postPaintBlankCanvasHotbarSlot, postPaintAimCalibrationIndex, postPaintVaultCommand,
+                postPaintSaveSelectDelayTicks, postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks,
+                postPaintRightClickRetries, postPaintFunJumpsEnabled, postPaintFunJumpCount,
+                postPaintFunJumpPressTicks, postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                postPaintPv2ClickPoint, List.copyOf(colors),
+                overrideResult.colors());
     }
 
     private ArtMapColor parseColor(JsonObject object) {
@@ -128,6 +218,22 @@ public final class ConfigManager {
         return new ArtMapColor(name, bukkitMaterial, item, legacyItem, rgb, tool);
     }
 
+    private ServerColorOverride parseServerColorOverride(JsonObject object) {
+        Identifier item = parseIdentifier(stringValue(object, "item", null));
+        if (item == null || !Registries.ITEM.containsId(item)) {
+            warnings.add("Skipping server color override: invalid item ID " + stringValue(object, "item", ""));
+            return null;
+        }
+        int rgb;
+        try {
+            rgb = RgbUtil.parseHex(stringValue(object, "rgb", "#000000"));
+        } catch (IllegalArgumentException e) {
+            warnings.add("Skipping server color override for " + item + ": invalid RGB");
+            return null;
+        }
+        return new ServerColorOverride(item, rgb);
+    }
+
     public JsonObject toJson(Config value) {
         JsonObject root = new JsonObject();
         root.addProperty("canvasWidth", value.canvasWidth);
@@ -141,8 +247,43 @@ public final class ConfigManager {
         root.addProperty("transparentPixelMode", value.transparentPixelMode.name());
         root.addProperty("debug", value.debug);
         root.addProperty("useOnlyInventoryAvailableColors", value.useOnlyInventoryAvailableColors);
+        root.addProperty("colorMatchMode", value.colorMatchMode.name());
         root.addProperty("includeToolsInColorMatching", value.includeToolsInColorMatching);
         root.addProperty("confirmMode", value.confirmMode);
+        root.addProperty("autoPaintDefaultDelayTicks", value.autoPaintDefaultDelayTicks);
+        root.addProperty("autoPaintMinDelayTicks", value.autoPaintMinDelayTicks);
+        root.addProperty("autoPaintClickButton", value.autoPaintClickButton.name());
+        root.addProperty("autoAimSettleTicks", value.autoAimSettleTicks);
+        root.addProperty("autoAimToleranceDegrees", value.autoAimToleranceDegrees);
+        root.addProperty("autoRequireCalibration", value.autoRequireCalibration);
+        root.addProperty("autoLockCameraDuringAuto", value.autoLockCameraDuringAuto);
+        root.addProperty("autoDragSameColorRuns", value.autoDragSameColorRuns);
+        root.addProperty("autoDragMinRunLength", value.autoDragMinRunLength);
+        root.addProperty("autoDragPixelTicks", value.autoDragPixelTicks);
+        root.addProperty("autoDragRequireExactCalibration", value.autoDragRequireExactCalibration);
+        root.addProperty("autoDragStartHoldTicks", value.autoDragStartHoldTicks);
+        root.addProperty("autoDragEndHoldTicks", value.autoDragEndHoldTicks);
+        root.addProperty("selectedCalibrationName", value.selectedCalibrationName);
+        root.addProperty("serverColorOverridesEnabled", value.serverColorOverridesEnabled);
+        root.addProperty("batchAutoStartAfterContinue", value.batchAutoStartAfterContinue);
+        root.addProperty("batchDefaultSpeedTicks", value.batchDefaultSpeedTicks);
+        root.addProperty("batchEnableDrag", value.batchEnableDrag);
+        root.addProperty("postPaintAutomationEnabled", value.postPaintAutomationEnabled);
+        root.addProperty("postPaintSaveHotbarSlot", value.postPaintSaveHotbarSlot);
+        root.addProperty("postPaintFinishedHotbarSlot", value.postPaintFinishedHotbarSlot);
+        root.addProperty("postPaintBlankCanvasHotbarSlot", value.postPaintBlankCanvasHotbarSlot);
+        root.addProperty("postPaintAimCalibrationIndex", value.postPaintAimCalibrationIndex);
+        root.addProperty("postPaintVaultCommand", value.postPaintVaultCommand);
+        root.addProperty("postPaintSaveSelectDelayTicks", value.postPaintSaveSelectDelayTicks);
+        root.addProperty("postPaintSaveAimSettleTicks", value.postPaintSaveAimSettleTicks);
+        root.addProperty("postPaintRenameOpenDelayTicks", value.postPaintRenameOpenDelayTicks);
+        root.addProperty("postPaintRightClickRetries", value.postPaintRightClickRetries);
+        root.addProperty("postPaintFunJumpsEnabled", value.postPaintFunJumpsEnabled);
+        root.addProperty("postPaintFunJumpCount", value.postPaintFunJumpCount);
+        root.addProperty("postPaintFunJumpPressTicks", value.postPaintFunJumpPressTicks);
+        root.addProperty("postPaintFunJumpGapTicks", value.postPaintFunJumpGapTicks);
+        addClickPoint(root, "postPaintRenameClickPoint", value.postPaintRenameClickPoint);
+        addClickPoint(root, "postPaintPv2ClickPoint", value.postPaintPv2ClickPoint);
         JsonArray colors = new JsonArray();
         for (ArtMapColor color : value.artMapColors) {
             JsonObject object = new JsonObject();
@@ -157,6 +298,14 @@ public final class ConfigManager {
             colors.add(object);
         }
         root.add("artMapColors", colors);
+        JsonArray overrides = new JsonArray();
+        for (ServerColorOverride override : value.serverColorOverrides) {
+            JsonObject object = new JsonObject();
+            object.addProperty("item", override.item().toString());
+            object.addProperty("rgb", RgbUtil.toHex(override.rgb()));
+            overrides.add(object);
+        }
+        root.add("serverColorOverrides", overrides);
         return root;
     }
 
@@ -164,6 +313,39 @@ public final class ConfigManager {
         warnings.add(warning);
         if (warningSink != null) {
             warningSink.accept(Text.literal("[ArtMap] " + warning));
+        }
+    }
+
+    public void setSelectedCalibrationName(String rawName, Consumer<Text> warningSink) {
+        String name = sanitizeCalibrationName(rawName);
+        config = config.withSelectedCalibrationName(name);
+        try {
+            save();
+        } catch (IOException e) {
+            warn("Failed to save selected calibration '" + name + "': " + e.getMessage(), warningSink);
+        }
+    }
+
+    public void setPostPaintAutomationEnabled(boolean enabled, Consumer<Text> warningSink) {
+        config = config.withPostPaintAutomationEnabled(enabled);
+        saveConfigChange("post-paint automation", warningSink);
+    }
+
+    public void setPostPaintRenameClickPoint(RecordedClickPoint point, Consumer<Text> warningSink) {
+        config = config.withPostPaintRenameClickPoint(point);
+        saveConfigChange("rename click point", warningSink);
+    }
+
+    public void setPostPaintPv2ClickPoint(RecordedClickPoint point, Consumer<Text> warningSink) {
+        config = config.withPostPaintPv2ClickPoint(point);
+        saveConfigChange("PV2 click point", warningSink);
+    }
+
+    private void saveConfigChange(String label, Consumer<Text> warningSink) {
+        try {
+            save();
+        } catch (IOException e) {
+            warn("Failed to save " + label + ": " + e.getMessage(), warningSink);
         }
     }
 
@@ -183,12 +365,51 @@ public final class ConfigManager {
         }
     }
 
+    private static double doubleValue(JsonObject object, String key, double fallback) {
+        try {
+            return object != null && object.has(key) ? object.get(key).getAsDouble() : fallback;
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+    }
+
     private static String stringValue(JsonObject object, String key, String fallback) {
         try {
             return object != null && object.has(key) ? object.get(key).getAsString() : fallback;
         } catch (RuntimeException e) {
             return fallback;
         }
+    }
+
+    private static RecordedClickPoint parseClickPoint(JsonObject root, String key) {
+        try {
+            if (root == null || !root.has(key) || !root.get(key).isJsonObject()) {
+                return null;
+            }
+            JsonObject object = root.getAsJsonObject(key);
+            return new RecordedClickPoint(
+                    doubleValue(object, "x", 0.0D),
+                    doubleValue(object, "y", 0.0D),
+                    doubleValue(object, "normalizedX", 0.0D),
+                    doubleValue(object, "normalizedY", 0.0D),
+                    intValue(object, "button", 0)
+            );
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static void addClickPoint(JsonObject root, String key, RecordedClickPoint point) {
+        if (point == null) {
+            return;
+        }
+        JsonObject object = new JsonObject();
+        object.addProperty("x", point.x());
+        object.addProperty("y", point.y());
+        object.addProperty("normalizedX", point.normalizedX());
+        object.addProperty("normalizedY", point.normalizedY());
+        object.addProperty("button", point.button());
+        root.add(key, object);
     }
 
     private static int clamp(int value, int min, int max) {
@@ -206,6 +427,65 @@ public final class ConfigManager {
         }
     }
 
+    public static String sanitizeCalibrationName(String value) {
+        if (value == null) {
+            return "1";
+        }
+        String normalized = value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_-]", "_");
+        return normalized.isBlank() ? "1" : normalized;
+    }
+
+    static OverrideResult applyServerColorOverrides(List<ArtMapColor> baseColors, boolean enabled, List<ServerColorOverride> overrides) {
+        List<ArtMapColor> effective = new ArrayList<>(baseColors);
+        if (!enabled) {
+            return new OverrideResult(List.copyOf(effective), 0);
+        }
+        int applied = 0;
+        for (ServerColorOverride override : overrides) {
+            int existingIndex = findColorIndex(effective, override.item());
+            if (existingIndex >= 0) {
+                ArtMapColor existing = effective.get(existingIndex);
+                effective.set(existingIndex, new ArtMapColor(
+                        existing.name(),
+                        existing.bukkitMaterial(),
+                        existing.item(),
+                        existing.legacyItem(),
+                        override.rgb(),
+                        existing.tool()
+                ));
+            } else {
+                effective.add(new ArtMapColor(
+                        readableName(override.item()),
+                        bukkitMaterialName(override.item()),
+                        override.item(),
+                        null,
+                        override.rgb(),
+                        false
+                ));
+            }
+            applied++;
+        }
+        return new OverrideResult(List.copyOf(effective), applied);
+    }
+
+    private static int findColorIndex(List<ArtMapColor> colors, Identifier item) {
+        for (int i = 0; i < colors.size(); i++) {
+            ArtMapColor color = colors.get(i);
+            if (color.item().equals(item)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static String readableName(Identifier item) {
+        return item.getPath().toUpperCase(Locale.ROOT);
+    }
+
+    private static String bukkitMaterialName(Identifier item) {
+        return item.getPath().toUpperCase(Locale.ROOT);
+    }
+
     public record Config(
             int canvasWidth,
             int canvasHeight,
@@ -218,10 +498,100 @@ public final class ConfigManager {
             TransparentPixelMode transparentPixelMode,
             boolean debug,
             boolean useOnlyInventoryAvailableColors,
+            ColorMatchMode colorMatchMode,
             boolean includeToolsInColorMatching,
             boolean confirmMode,
-            List<ArtMapColor> artMapColors
+            int autoPaintDefaultDelayTicks,
+            int autoPaintMinDelayTicks,
+            AutoClickButton autoPaintClickButton,
+            int autoAimSettleTicks,
+            double autoAimToleranceDegrees,
+            boolean autoRequireCalibration,
+            boolean autoLockCameraDuringAuto,
+            boolean autoDragSameColorRuns,
+            int autoDragMinRunLength,
+            int autoDragPixelTicks,
+            boolean autoDragRequireExactCalibration,
+            int autoDragStartHoldTicks,
+            int autoDragEndHoldTicks,
+            String selectedCalibrationName,
+            boolean serverColorOverridesEnabled,
+            List<ServerColorOverride> serverColorOverrides,
+            boolean batchAutoStartAfterContinue,
+            int batchDefaultSpeedTicks,
+            boolean batchEnableDrag,
+            boolean postPaintAutomationEnabled,
+            int postPaintSaveHotbarSlot,
+            int postPaintFinishedHotbarSlot,
+            int postPaintBlankCanvasHotbarSlot,
+            int postPaintAimCalibrationIndex,
+            String postPaintVaultCommand,
+            int postPaintSaveSelectDelayTicks,
+            int postPaintSaveAimSettleTicks,
+            int postPaintRenameOpenDelayTicks,
+            int postPaintRightClickRetries,
+            boolean postPaintFunJumpsEnabled,
+            int postPaintFunJumpCount,
+            int postPaintFunJumpPressTicks,
+            int postPaintFunJumpGapTicks,
+            RecordedClickPoint postPaintRenameClickPoint,
+            RecordedClickPoint postPaintPv2ClickPoint,
+            List<ArtMapColor> artMapColors,
+            List<ArtMapColor> effectiveArtMapColors
     ) {
+        public List<ArtMapColor> effectiveArtMapColors() {
+            return effectiveArtMapColors;
+        }
+
+        public Config withSelectedCalibrationName(String value) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, autoDragSameColorRuns,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, ConfigManager.sanitizeCalibrationName(value),
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, batchEnableDrag, postPaintAutomationEnabled,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, postPaintVaultCommand, postPaintSaveSelectDelayTicks,
+                    postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
+                    postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
+                    postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+        }
+
+        public Config withPostPaintAutomationEnabled(boolean value) {
+            return copy(value, postPaintRenameClickPoint, postPaintPv2ClickPoint);
+        }
+
+        public Config withPostPaintRenameClickPoint(RecordedClickPoint value) {
+            return copy(postPaintAutomationEnabled, value, postPaintPv2ClickPoint);
+        }
+
+        public Config withPostPaintPv2ClickPoint(RecordedClickPoint value) {
+            return copy(postPaintAutomationEnabled, postPaintRenameClickPoint, value);
+        }
+
+        private Config copy(boolean enabled, RecordedClickPoint renamePoint, RecordedClickPoint pv2Point) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, autoDragSameColorRuns,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, selectedCalibrationName,
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, batchEnableDrag, enabled, postPaintSaveHotbarSlot,
+                    postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot, postPaintAimCalibrationIndex,
+                    postPaintVaultCommand, postPaintSaveSelectDelayTicks, postPaintSaveAimSettleTicks,
+                    postPaintRenameOpenDelayTicks, postPaintRightClickRetries, postPaintFunJumpsEnabled,
+                    postPaintFunJumpCount, postPaintFunJumpPressTicks, postPaintFunJumpGapTicks, renamePoint, pv2Point,
+                    artMapColors, effectiveArtMapColors);
+        }
+
         public static Config defaults() {
             List<ArtMapColor> colors = new ArrayList<>();
             for (JsonElement element : defaultColorJson()) {
@@ -235,9 +605,25 @@ public final class ConfigManager {
                         object.get("tool").getAsBoolean()
                 ));
             }
+            List<ServerColorOverride> overrides = new ArrayList<>();
+            for (JsonElement element : defaultServerColorOverrideJson()) {
+                JsonObject object = element.getAsJsonObject();
+                overrides.add(new ServerColorOverride(
+                        Identifier.of(object.get("item").getAsString()),
+                        RgbUtil.parseHex(object.get("rgb").getAsString())
+                ));
+            }
+            OverrideResult overrideResult = applyServerColorOverrides(colors, true, overrides);
             return new Config(32, 32, 8, true, true, true, false, 10,
-                    TransparentPixelMode.SKIP, false, true, false, false, List.copyOf(colors));
+                    TransparentPixelMode.SKIP, false, true, ColorMatchMode.RGB, false, false,
+                    20, 5, AutoClickButton.RIGHT, 2, 0.75D, true, true,
+                    true, 2, 2, true, 2, 1, "1", true, List.copyOf(overrides),
+                    true, 5, true, false, 2, 0, 1, 500, "/pv 2", 2, 3, 20, 2, true, 5, 2, 4, null, null,
+                    List.copyOf(colors), overrideResult.colors());
         }
+    }
+
+    record OverrideResult(List<ArtMapColor> colors, int applied) {
     }
 
     private static JsonArray defaultColorJson() {
@@ -297,6 +683,23 @@ public final class ConfigManager {
                   {"name":"BLACK_TERRACOTTA","bukkitMaterial":"CHARCOAL","item":"minecraft:charcoal","rgb":"#251610","tool":false},
                   {"name":"DARKEN_TOOL","bukkitMaterial":"COAL","item":"minecraft:coal","rgb":"#000000","tool":true},
                   {"name":"LIGHTEN_TOOL","bukkitMaterial":"FEATHER","item":"minecraft:feather","rgb":"#FFFFFF","tool":true}
+                ]
+                """;
+        return GSON.fromJson(json, JsonArray.class);
+    }
+
+    private static JsonArray defaultServerColorOverrideJson() {
+        String json = """
+                [
+                  {"item":"minecraft:crimson_nylium","rgb":"#9F2829"},
+                  {"item":"minecraft:beetroot","rgb":"#7D495A"},
+                  {"item":"minecraft:brick","rgb":"#812B2B"},
+                  {"item":"minecraft:red_dye","rgb":"#D70000"},
+                  {"item":"minecraft:apple","rgb":"#773126"},
+                  {"item":"minecraft:spider_eye","rgb":"#874041"},
+                  {"item":"minecraft:crimson_hyphae","rgb":"#4D1418"},
+                  {"item":"minecraft:crimson_stem","rgb":"#7C3450"},
+                  {"item":"minecraft:nether_wart","rgb":"#5E0100"}
                 ]
                 """;
         return GSON.fromJson(json, JsonArray.class);

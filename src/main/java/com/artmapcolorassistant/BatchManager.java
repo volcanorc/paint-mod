@@ -1,0 +1,194 @@
+package com.artmapcolorassistant;
+
+public final class BatchManager {
+    private final ConfigManager configManager;
+    private final SessionController controller;
+    private final AutoPainter autoPainter;
+    private final PostPaintWorkflow postPaintWorkflow;
+    private boolean active;
+    private boolean paintingActive;
+    private boolean waitingForSetup;
+    private int first;
+    private int last;
+    private int current;
+    private String nameSuffix = "";
+    private String activeFilename;
+
+    public BatchManager(ConfigManager configManager, SessionController controller, AutoPainter autoPainter,
+                        PostPaintWorkflow postPaintWorkflow) {
+        this.configManager = configManager;
+        this.controller = controller;
+        this.autoPainter = autoPainter;
+        this.postPaintWorkflow = postPaintWorkflow;
+    }
+
+    public void start(int first, int last, String suffix, SessionController.MessageSink sink) {
+        if (first <= 0 || last < first) {
+            sink.error("Usage: #painting batch start <first> <last> <nameSuffix>");
+            return;
+        }
+        stopSilently();
+        this.active = true;
+        this.paintingActive = false;
+        this.waitingForSetup = false;
+        this.first = first;
+        this.last = last;
+        this.current = first;
+        this.nameSuffix = suffix == null ? "" : suffix.trim();
+        sink.info("Batch started: " + first + ".png to " + last + ".png suffix=\"" + this.nameSuffix + "\".");
+        startCurrent(sink);
+    }
+
+    public void continueBatch(SessionController.MessageSink sink) {
+        if (!active) {
+            sink.error("No batch is active. Use #painting batch start <first> <last> <nameSuffix>.");
+            return;
+        }
+        if (paintingActive) {
+            sink.error("Batch is already painting " + activeFilename + ".");
+            return;
+        }
+        if (current > last) {
+            sink.info("Batch complete. Painted " + first + ".png through " + last + ".png.");
+            active = false;
+            waitingForSetup = false;
+            return;
+        }
+        waitingForSetup = false;
+        startCurrent(sink);
+    }
+
+    public void stop(SessionController.MessageSink sink) {
+        stopSilently();
+        sink.info("Batch stopped.");
+    }
+
+    public void status(SessionController.MessageSink sink) {
+        if (!active) {
+            sink.info("No batch is active.");
+            return;
+        }
+        sink.info("Batch status: current=" + current
+                + " last=" + last
+                + " nextFile=" + nextFilename()
+                + " suffix=\"" + nameSuffix + "\""
+                + " waitingForSetup=" + waitingForSetup
+                + " paintingActive=" + paintingActive
+                + " " + postPaintWorkflow.statusLine() + ".");
+    }
+
+    public String statusLine() {
+        if (!active) {
+            return "batch=none";
+        }
+        return "batch=" + current + "/" + last
+                + (waitingForSetup ? " waiting" : paintingActive ? " painting" : " ready")
+                + " next=" + nextFilename()
+                + " " + postPaintWorkflow.statusLine();
+    }
+
+    public boolean active() {
+        return active;
+    }
+
+    public void tick(SessionController.MessageSink sink) {
+        if (!active || !paintingActive) {
+            tickPostPaint(sink);
+            return;
+        }
+        if (controller.session() != null || autoPainter.running()) {
+            return;
+        }
+        String completedFilename = activeFilename == null ? (current + ".png") : activeFilename;
+        String saveName = saveName(current);
+        paintingActive = false;
+        if (configManager.config().postPaintAutomationEnabled()) {
+            waitingForSetup = false;
+            int completedNumber = current;
+            current++;
+            postPaintWorkflow.start(completedNumber, nameSuffix, sink);
+            return;
+        }
+        waitingForSetup = true;
+        current++;
+        if (current > last) {
+            active = false;
+            waitingForSetup = false;
+            sink.info("Painting " + completedFilename + " complete. Save as \"" + saveName
+                    + "\", store it, and the batch is complete.");
+            return;
+        }
+        sink.info("Painting " + completedFilename + " complete. Save as \"" + saveName
+                + "\", store it, place the next blank canvas, enter painting mode, then run #painting batch continue.");
+    }
+
+    private void startCurrent(SessionController.MessageSink sink) {
+        if (current > last) {
+            active = false;
+            waitingForSetup = false;
+            sink.info("Batch complete. Painted " + first + ".png through " + last + ".png.");
+            return;
+        }
+        ConfigManager.Config config = configManager.config();
+        String filename = nextFilename();
+        activeFilename = filename;
+        boolean started = controller.start(filename, sink);
+        if (!started || controller.session() == null) {
+            paintingActive = false;
+            waitingForSetup = true;
+            sink.error("Batch could not start " + filename + ". Fix the issue, then run #painting batch continue.");
+            return;
+        }
+        int batchSpeed = Math.max(config.batchDefaultSpeedTicks(), config.autoPaintMinDelayTicks());
+        autoPainter.setSpeed(batchSpeed, config, sink);
+        autoPainter.setDragEnabled(config.batchEnableDrag(), sink);
+        if (config.batchAutoStartAfterContinue()) {
+            autoPainter.start(config, sink);
+            if (!autoPainter.running()) {
+                paintingActive = false;
+                waitingForSetup = true;
+                sink.error("Batch loaded " + filename + " but auto paint did not start. Fix setup, then run #painting batch continue.");
+                return;
+            }
+        }
+        paintingActive = true;
+        waitingForSetup = false;
+    }
+
+    private void tickPostPaint(SessionController.MessageSink sink) {
+        PostPaintWorkflow.Result result = postPaintWorkflow.tick(configManager.config(), sink);
+        if (result == PostPaintWorkflow.Result.COMPLETE) {
+            if (current > last) {
+                active = false;
+                waitingForSetup = false;
+                sink.info("Batch complete. Painted " + first + ".png through " + last + ".png.");
+                return;
+            }
+            waitingForSetup = false;
+            startCurrent(sink);
+        } else if (result == PostPaintWorkflow.Result.FAILED) {
+            waitingForSetup = true;
+            sink.error("Post-paint automation paused. Fix the issue or finish setup manually, then run #painting batch continue.");
+        }
+    }
+
+    private String nextFilename() {
+        return current + ".png";
+    }
+
+    private String saveName(int number) {
+        return nameSuffix.isBlank() ? Integer.toString(number) : number + " " + nameSuffix;
+    }
+
+    private void stopSilently() {
+        postPaintWorkflow.stop();
+        active = false;
+        paintingActive = false;
+        waitingForSetup = false;
+        first = 0;
+        last = 0;
+        current = 0;
+        activeFilename = null;
+        nameSuffix = "";
+    }
+}

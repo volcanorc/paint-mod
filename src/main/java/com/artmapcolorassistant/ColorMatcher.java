@@ -14,7 +14,7 @@ public final class ColorMatcher {
     public List<ArtMapColor> buildMatchingPalette(ConfigManager.Config config, InventoryHelper.InventorySnapshot inventory) {
         Set<Identifier> available = inventory.availableItemIds();
         List<ArtMapColor> result = new ArrayList<>();
-        for (ArtMapColor color : config.artMapColors()) {
+        for (ArtMapColor color : config.effectiveArtMapColors()) {
             if (color.tool() && !config.includeToolsInColorMatching()) {
                 continue;
             }
@@ -44,7 +44,7 @@ public final class ColorMatcher {
             if (alpha <= config.alphaThreshold() && config.transparentPixelMode() == TransparentPixelMode.MATCH_WHITE) {
                 rgb = 0xFFFFFF;
             }
-            ArtMapColor color = nearest(rgb, palette);
+            ArtMapColor color = nearest(rgb, palette, config.colorMatchMode());
             steps.add(new PaintStep(index, x, y, argb, alpha <= config.alphaThreshold(), color, color.item()));
         }
         return steps;
@@ -61,9 +61,25 @@ public final class ColorMatcher {
     }
 
     public ArtMapColor nearest(int rgb, List<ArtMapColor> palette) {
+        return nearest(rgb, palette, ColorMatchMode.RGB);
+    }
+
+    public ArtMapColor nearest(int rgb, List<ArtMapColor> palette, ColorMatchMode mode) {
         return palette.stream()
-                .min(Comparator.comparingInt(color -> RgbUtil.squaredDistance(rgb, color.rgb())))
+                .min(Comparator.comparingDouble(color -> RgbUtil.distance(rgb, color.rgb(), mode)))
                 .orElseThrow();
+    }
+
+    public List<ColorDistance> nearestColors(int rgb, List<ArtMapColor> palette, ColorMatchMode mode, int limit) {
+        return palette.stream()
+                .map(color -> new ColorDistance(color, RgbUtil.distance(rgb, color.rgb(), mode)))
+                .sorted(Comparator.comparingDouble(ColorDistance::distance))
+                .limit(limit)
+                .toList();
+    }
+
+    public boolean isReddish(ArtMapColor color) {
+        return RgbUtil.isReddish(color.rgb());
     }
 
     private boolean containsColorItem(ArtMapColor color, Set<Identifier> available) {
@@ -72,7 +88,7 @@ public final class ColorMatcher {
 
     public Set<ArtMapColor> detectedTools(ConfigManager.Config config, InventoryHelper.InventorySnapshot inventory) {
         Set<ArtMapColor> tools = new HashSet<>();
-        for (ArtMapColor color : config.artMapColors()) {
+        for (ArtMapColor color : config.effectiveArtMapColors()) {
             if (color.tool() && containsColorItem(color, inventory.availableItemIds())) {
                 tools.add(color);
             }
@@ -84,5 +100,8 @@ public final class ColorMatcher {
         public MatchException(String message) {
             super(message);
         }
+    }
+
+    public record ColorDistance(ArtMapColor color, double distance) {
     }
 }
