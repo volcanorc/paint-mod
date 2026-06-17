@@ -11,15 +11,22 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Vec3d;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 
 public final class CalibrationManager {
@@ -34,6 +41,9 @@ public final class CalibrationManager {
     private int nextRecordingIndex;
     private int savedExactCount;
     private String lastCalibrationName = "1";
+    private CalibrationSource activeSource = CalibrationSource.NONE;
+    private CalibrationDirection activeDirection;
+    private boolean bundledPortableOverride;
 
     public CalibrationManager(MinecraftClient client, Path calibrationsPath) {
         this.client = client;
@@ -127,6 +137,28 @@ public final class CalibrationManager {
         return calibration.exactSamples();
     }
 
+    public String activeCalibrationSourceLabel() {
+        return activeSource.label();
+    }
+
+    public String activeCalibrationDirectionLabel() {
+        return activeDirection == null ? "none" : activeDirection.resourceName();
+    }
+
+    public boolean bundledPortableOverrideActive() {
+        return activeSource == CalibrationSource.BUNDLED && bundledPortableOverride && usingExactCalibration();
+    }
+
+    public String activeCalibrationStatusLine() {
+        String direction = activeDirection == null ? "none" : activeDirection.resourceName();
+        String name = calibration.loadedExactName() == null ? "none" : calibration.loadedExactName();
+        return "Calibration source=" + activeSource.label()
+                + " direction=" + direction
+                + " loaded=" + name
+                + " points=" + calibration.exactCount()
+                + " portableOverride=" + bundledPortableOverrideActive() + ".";
+    }
+
     public boolean hasExactFor(PaintStep step, ConfigManager.Config config) {
         return calibration.hasExact(CanvasMath.toIndex(step.x(), step.y(), config.canvasWidth()));
     }
@@ -164,10 +196,12 @@ public final class CalibrationManager {
             return;
         }
         calibration.clearExact();
+        clearLoadedSource();
         recordingName = name;
         recordingWidth = config.canvasWidth();
         recordingHeight = config.canvasHeight();
         calibration.setLoadedMetadata(name, recordingWidth, recordingHeight);
+        activeSource = CalibrationSource.USER_FILE;
         savedExactCount = savedExactCount(name, config);
         nextRecordingIndex = firstMissingIndex(recordingWidth, recordingHeight);
         if (nextRecordingIndex >= recordingWidth * recordingHeight) {
@@ -188,10 +222,12 @@ public final class CalibrationManager {
             return;
         }
         calibration.clearExact();
+        clearLoadedSource();
         recordingName = name;
         recordingWidth = config.canvasWidth();
         recordingHeight = config.canvasHeight();
         calibration.setLoadedMetadata(name, recordingWidth, recordingHeight);
+        activeSource = CalibrationSource.USER_FILE;
         loadExistingForRecording(name, config, sink);
         savedExactCount = calibration.exactCount();
         nextRecordingIndex = firstMissingIndex(recordingWidth, recordingHeight);
@@ -296,6 +332,7 @@ public final class CalibrationManager {
             Files.deleteIfExists(calibrationPath(name));
             if (name.equals(recordingName)) {
                 calibration.clearExact();
+                clearLoadedSource();
                 clearRecordingState();
             }
             sink.info("Reset exact calibration '" + name + "'.");
@@ -314,36 +351,112 @@ public final class CalibrationManager {
         }
         try (Reader reader = Files.newBufferedReader(path)) {
             JsonObject root = GSON.fromJson(reader, JsonObject.class);
-            int width = root.get("canvasWidth").getAsInt();
-            int height = root.get("canvasHeight").getAsInt();
-            if (width != config.canvasWidth() || height != config.canvasHeight()) {
-                sink.error("Calibration '" + name + "' is " + width + "x" + height
-                        + " but config canvas is " + config.canvasWidth() + "x" + config.canvasHeight() + ".");
-                return;
-            }
-            calibration.clearExact();
-            calibration.setLoadedMetadata(name, width, height);
-            JsonArray samples = root.getAsJsonArray("samples");
-            for (JsonElement element : samples) {
-                if (!element.isJsonObject()) {
-                    continue;
-                }
-                JsonObject sample = element.getAsJsonObject();
-                int index = sample.get("index").getAsInt();
-                calibration.setExact(index, parseSample(sample));
-            }
-            sink.info("Loaded exact calibration '" + name + "': " + calibration.exactCount()
-                    + "/" + (width * height) + " points.");
-            if (!calibration.exactComplete(width, height)) {
-                sink.info("Calibration is partial. Auto paint will stop at the first pixel without a recorded calibration point.");
-            }
+            loadExactFromRoot(name, root, config, CalibrationSource.USER_FILE, null, false, sink);
         } catch (RuntimeException | IOException e) {
             sink.error("Failed to load calibration '" + name + "': " + e.getMessage());
         }
     }
 
+    public boolean prepareBundledDirectionalCalibration(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (!config.useBundledDirectionalCalibration() || !config.autoDetectCalibrationDirectionOnAutoStart()) {
+            return true;
+        }
+        if (client.player == null || client.world == null) {
+            sink.error("Cannot auto-detect calibration direction before joining a world.");
+            return false;
+        }
+        Optional<CalibrationDirection> direction = CalibrationDirection.nearest(
+                client.player.getYaw(),
+                config.cardinalDirectionToleranceDegrees()
+        );
+        if (direction.isEmpty()) {
+            sink.error("Face the canvas directly before starting auto paint. Current direction is too diagonal.");
+            return false;
+        }
+        return loadBundledDirectional(config.defaultBundledCalibrationPrefix(), direction.get(), config, sink);
+    }
+
+    public boolean loadBundledDirectional(String rawPrefix, CalibrationDirection direction, ConfigManager.Config config,
+                                          SessionController.MessageSink sink) {
+        String prefix = ConfigManager.sanitizeCalibrationName(rawPrefix == null || rawPrefix.isBlank() ? "ee" : rawPrefix);
+        String name = prefix + "_" + direction.resourceName();
+        String resourcePath = "assets/" + ConfigManager.MOD_ID + "/calibrations/" + name + ".json";
+        try (InputStream stream = CalibrationManager.class.getClassLoader().getResourceAsStream(resourcePath)) {
+            if (stream == null) {
+                sink.error("Built-in calibration missing: " + resourcePath);
+                return false;
+            }
+            try (Reader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+                JsonObject root = GSON.fromJson(reader, JsonObject.class);
+                return loadExactFromRoot(name, root, config, CalibrationSource.BUNDLED, direction, true, sink);
+            }
+        } catch (RuntimeException | IOException e) {
+            sink.error("Failed to load built-in calibration '" + name + "': " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean loadExactFromRoot(String name, JsonObject root, ConfigManager.Config config,
+                                      CalibrationSource source, CalibrationDirection direction,
+                                      boolean requireComplete, SessionController.MessageSink sink) {
+        if (root == null) {
+            throw new IllegalArgumentException("empty JSON");
+        }
+        int width = root.get("canvasWidth").getAsInt();
+        int height = root.get("canvasHeight").getAsInt();
+        int expectedTotal = config.canvasWidth() * config.canvasHeight();
+        if (width != config.canvasWidth() || height != config.canvasHeight()) {
+            sink.error("Calibration '" + name + "' is " + width + "x" + height
+                    + " but config canvas is " + config.canvasWidth() + "x" + config.canvasHeight() + ".");
+            return false;
+        }
+        JsonArray samples = root.getAsJsonArray("samples");
+        if (samples == null) {
+            sink.error("Calibration '" + name + "' has no samples array.");
+            return false;
+        }
+        Map<Integer, CalibrationSample> parsed = new HashMap<>();
+        Set<Integer> seen = new HashSet<>();
+        for (JsonElement element : samples) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject sample = element.getAsJsonObject();
+            int index = sample.get("index").getAsInt();
+            if (index < 0 || index >= expectedTotal) {
+                sink.error("Calibration '" + name + "' has out-of-range sample index " + index + ".");
+                return false;
+            }
+            if (!seen.add(index)) {
+                sink.error("Calibration '" + name + "' has duplicate sample index " + index + ".");
+                return false;
+            }
+            parsed.put(index, parseSample(sample));
+        }
+        if (requireComplete && parsed.size() != expectedTotal) {
+            sink.error("Built-in calibration '" + name + "' has wrong sample count "
+                    + parsed.size() + "/" + expectedTotal + ".");
+            return false;
+        }
+        calibration.clearExact();
+        calibration.setLoadedMetadata(name, width, height);
+        parsed.forEach(calibration::setExact);
+        activeSource = source;
+        activeDirection = direction;
+        bundledPortableOverride = source == CalibrationSource.BUNDLED && config.autoEnablePortableForBundledCalibration();
+        String sourceLabel = source == CalibrationSource.BUNDLED ? "built-in" : "exact";
+        sink.info("Loaded " + sourceLabel + " calibration '" + name + "': " + calibration.exactCount()
+                + "/" + (width * height) + " points"
+                + (direction == null ? "." : " direction=" + direction.resourceName() + "."));
+        if (!requireComplete && !calibration.exactComplete(width, height)) {
+            sink.info("Calibration is partial. Auto paint will stop at the first pixel without a recorded calibration point.");
+        }
+        return true;
+    }
+
     public void clear(SessionController.MessageSink sink) {
         calibration.clear();
+        clearLoadedSource();
         recordingName = null;
         nextRecordingIndex = 0;
         sink.info("Calibration cleared.");
@@ -361,6 +474,7 @@ public final class CalibrationManager {
                     + " next x=" + x + " y=" + y + ".");
         }
         sink.info(calibration.exactStatus(recordingOrDefaultWidth(), recordingOrDefaultHeight()));
+        sink.info(activeCalibrationStatusLine());
         sink.info(calibration.status());
         if (!calibration.complete() && calibration.exactCount() == 0) {
             sink.error("Calibration incomplete. Use #painting calibrate start <name> or set top-left, top-right, bottom-left, and bottom-right.");
@@ -389,7 +503,7 @@ public final class CalibrationManager {
             sink.error("Cannot test aim before joining a world.");
             return;
         }
-        String moveWarning = movementWarning();
+        String moveWarning = movementWarning(config);
         if (moveWarning != null) {
             sink.error(moveWarning);
             return;
@@ -410,7 +524,7 @@ public final class CalibrationManager {
         if (usingExactCalibration() && !calibration.hasExact(index)) {
             return false;
         }
-        if (movementWarning() != null) {
+        if (movementWarning(config) != null) {
             return false;
         }
         AimAngles angles = targetAngles(x, y, config);
@@ -437,6 +551,9 @@ public final class CalibrationManager {
     }
 
     public String movementWarning() {
+        if (bundledPortableOverrideActive()) {
+            return null;
+        }
         if (client.player == null || (!calibration.complete() && calibration.exactCount() == 0)) {
             return null;
         }
@@ -453,6 +570,13 @@ public final class CalibrationManager {
             return "Player moved since calibration. Recalibrate from the current ArtMap seat/view before auto painting.";
         }
         return null;
+    }
+
+    public String movementWarning(ConfigManager.Config config) {
+        if ((config.portableExactCalibrationMode() || bundledPortableOverrideActive()) && usingExactCalibration()) {
+            return null;
+        }
+        return movementWarning();
     }
 
     private boolean validateCoordinates(int x, int y, ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -653,6 +777,12 @@ public final class CalibrationManager {
         savedExactCount = 0;
     }
 
+    private void clearLoadedSource() {
+        activeSource = CalibrationSource.NONE;
+        activeDirection = null;
+        bundledPortableOverride = false;
+    }
+
     private int recordingOrDefaultWidth() {
         return recordingWidth > 0 ? recordingWidth : 32;
     }
@@ -666,5 +796,21 @@ public final class CalibrationManager {
     }
 
     public record CalibrationFileInfo(String name, int savedCount, int total, String status) {
+    }
+
+    private enum CalibrationSource {
+        NONE("none"),
+        USER_FILE("user file"),
+        BUNDLED("bundled");
+
+        private final String label;
+
+        CalibrationSource(String label) {
+            this.label = label;
+        }
+
+        String label() {
+            return label;
+        }
     }
 }

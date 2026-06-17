@@ -1,6 +1,7 @@
 build/
 .gradle/
 work/tools/
+work/
 outputs/
 *.jar
 *.class

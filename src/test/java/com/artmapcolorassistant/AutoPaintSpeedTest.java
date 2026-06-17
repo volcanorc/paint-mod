@@ -8,11 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AutoPaintSpeedTest {
     @Test
-    void defaultIsTwentyTicksAndMinimumIsFiveTicks() {
+    void defaultIsFiveTicksAndMinimumIsFiveTicks() {
         ConfigManager.Config config = ConfigManager.Config.defaults();
-        assertEquals(20, config.autoPaintDefaultDelayTicks());
+        assertEquals(5, config.autoPaintDefaultDelayTicks());
         assertEquals(5, config.autoPaintMinDelayTicks());
-        assertEquals(20, AutoPaintSpeed.normalizeDefault(config.autoPaintDefaultDelayTicks(), config.autoPaintMinDelayTicks()));
+        assertEquals(5, AutoPaintSpeed.normalizeDefault(config.autoPaintDefaultDelayTicks(), config.autoPaintMinDelayTicks()));
     }
 
     @Test

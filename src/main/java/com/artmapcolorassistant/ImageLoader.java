@@ -16,10 +16,10 @@ public final class ImageLoader {
         }
         Path path = importsPath.resolve(filename).normalize();
         if (!path.startsWith(importsPath.normalize())) {
-            throw new ImageLoadException("Image must be inside the imports folder.");
+            throw new ImageLoadException("Image must be inside the imports folder: " + importsPath);
         }
         if (Files.notExists(path)) {
-            throw new ImageLoadException("File not found in imports folder: " + filename);
+            throw new ImageLoadException("File not found in imports folder: " + filename + ". Put it in: " + importsPath);
         }
         BufferedImage image;
         try {

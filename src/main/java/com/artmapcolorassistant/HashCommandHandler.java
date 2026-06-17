@@ -1,26 +1,39 @@
 package com.artmapcolorassistant;
 
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.SharedConstants;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+import org.lwjgl.glfw.GLFW;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
+import java.util.stream.Stream;
 
 public final class HashCommandHandler {
     private final ConfigManager configManager;
     private final SessionController controller;
     private final AutoPainter autoPainter;
+    private final SmartPainter smartPainter;
     private final CalibrationManager calibrationManager;
     private final BatchManager batchManager;
     private final GuiClickRecorder guiClickRecorder;
     private boolean confirmMode;
 
     public HashCommandHandler(ConfigManager configManager, SessionController controller, AutoPainter autoPainter,
+                              SmartPainter smartPainter,
                               CalibrationManager calibrationManager, BatchManager batchManager,
                               GuiClickRecorder guiClickRecorder) {
         this.configManager = configManager;
         this.controller = controller;
         this.autoPainter = autoPainter;
+        this.smartPainter = smartPainter;
         this.calibrationManager = calibrationManager;
         this.batchManager = batchManager;
         this.guiClickRecorder = guiClickRecorder;
@@ -67,16 +80,42 @@ public final class HashCommandHandler {
                 if (autoPainter.running()) {
                     autoPainter.stop(sink);
                 }
+                if (smartPainter.running()) {
+                    smartPainter.stop(sink);
+                }
                 controller.stop(sink);
             }
-            case "pause" -> controller.pause(sink);
-            case "resume" -> controller.resume(sink);
-            case "back" -> controller.back(sink);
-            case "skip" -> controller.skip(sink);
-            case "status" -> controller.status(sink);
+            case "pause" -> {
+                if (smartPainter.running()) {
+                    smartPainter.invalidateTrust("manual pause");
+                    smartPainter.pause(sink);
+                }
+                controller.pause(sink);
+            }
+            case "resume" -> {
+                smartPainter.resume(sink);
+                controller.resume(sink);
+            }
+            case "back" -> {
+                if (smartPainter.running()) {
+                    smartPainter.invalidateTrust("back command");
+                }
+                controller.back(sink);
+            }
+            case "skip" -> {
+                if (smartPainter.running()) {
+                    smartPainter.invalidateTrust("skip command");
+                }
+                controller.skip(sink);
+            }
+            case "status" -> paintingStatus(sink);
             case "help" -> help(sink);
             case "gui" -> openGui(sink);
-            case "full" -> autoPainter.start(configManager.config(), sink);
+            case "paths" -> paths(sink);
+            case "set" -> handleSet(parts, sink);
+            case "android" -> handleAndroid(parts, sink);
+            case "calibration" -> handleCalibrationPortable(parts, sink);
+            case "full" -> startAutoOrSmart(sink);
             case "reload" -> {
                 configManager.load(text -> sink.error(text.getString()));
                 confirmMode = configManager.config().confirmMode();
@@ -90,6 +129,8 @@ public final class HashCommandHandler {
             case "pos" -> handlePos(parts, sink);
             case "confirm" -> handleConfirm(parts, sink);
             case "auto" -> handleAuto(parts, sink);
+            case "smart" -> handleSmart(parts, sink);
+            case "bucket" -> handleBucket(parts, sink);
             case "palette" -> handlePalette(parts, sink);
             case "batch" -> handleBatch(parts, sink);
             case "postpaint" -> handlePostPaint(parts, sink);
@@ -100,12 +141,65 @@ public final class HashCommandHandler {
             case "usecalibration" -> handleUseCalibration(parts, sink);
             default -> {
                 if (parts.length == 1 && command.endsWith(".png")) {
-                    controller.start(parts[0], sink);
+                    startImage(parts[0], sink);
                 } else {
                     usage(sink);
                 }
             }
         }
+    }
+
+    private void handleSet(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 2) {
+            sink.error("Usage: #painting set manual|auto|smart");
+            return;
+        }
+        PaintingMode mode = switch (parts[1].toLowerCase(Locale.ROOT)) {
+            case "manual" -> PaintingMode.MANUAL;
+            case "auto" -> PaintingMode.AUTO;
+            case "smart" -> PaintingMode.SMART;
+            default -> null;
+        };
+        if (mode == null) {
+            sink.error("Usage: #painting set manual|auto|smart");
+            return;
+        }
+        applyPaintingMode(mode, sink);
+    }
+
+    private void applyPaintingMode(PaintingMode mode, SessionController.MessageSink sink) {
+        configManager.setPaintingMode(mode, text -> sink.error(text.getString()));
+        ConfigManager.Config config = configManager.config();
+        if (config.useBundledDirectionalCalibration() && config.autoDetectCalibrationDirectionOnAutoStart()) {
+            sink.info("Built-in directional calibration " + config.defaultBundledCalibrationPrefix()
+                    + "_<direction> will load when auto painting starts.");
+        } else {
+            calibrationManager.loadExact(config.selectedCalibrationName(), config, sink);
+        }
+        autoPainter.setSpeed(5, config, sink);
+        autoPainter.setDragEnabled(config.autoDragSameColorRuns(), sink);
+        switch (mode) {
+            case MANUAL -> {
+                if (smartPainter.running()) {
+                    smartPainter.stop(sink);
+                }
+                if (autoPainter.running()) {
+                    autoPainter.stop(sink);
+                }
+            }
+            case AUTO -> {
+                if (smartPainter.running()) {
+                    smartPainter.stop(sink);
+                }
+            }
+            case SMART -> {
+                if (autoPainter.running()) {
+                    autoPainter.stop(sink);
+                    sink.info("Stopped old auto painter. Run #painting auto start to begin smart painting.");
+                }
+            }
+        }
+        sink.info("Painting type set to " + mode.commandName() + ".");
     }
 
     private void handlePostPaint(String[] parts, SessionController.MessageSink sink) {
@@ -141,13 +235,16 @@ public final class HashCommandHandler {
 
     private void handlePv2(String[] parts, SessionController.MessageSink sink) {
         if (parts.length != 2) {
-            sink.error("Usage: #painting pv2 click|clear");
+            sink.error("Usage: #painting pv2 click|clear (legacy only; PV2 transfer is automatic now)");
             return;
         }
         switch (parts[1].toLowerCase()) {
-            case "click" -> guiClickRecorder.armPv2(sink);
+            case "click" -> {
+                guiClickRecorder.armPv2(sink);
+                sink.info("PV2 click recording is legacy only. Normal post-paint now transfers hotbar slot 1 automatically.");
+            }
             case "clear" -> guiClickRecorder.clearPv2(sink);
-            default -> sink.error("Usage: #painting pv2 click|clear");
+            default -> sink.error("Usage: #painting pv2 click|clear (legacy only; PV2 transfer is automatic now)");
         }
     }
 
@@ -159,9 +256,154 @@ public final class HashCommandHandler {
                 + " blankSlot=" + (config.postPaintBlankCanvasHotbarSlot() + 1)
                 + " aimIndex=" + config.postPaintAimCalibrationIndex()
                 + " vaultCommand=\"" + config.postPaintVaultCommand() + "\""
-                + " renamePoint=" + (config.postPaintRenameClickPoint() != null)
-                + " pv2Point=" + (config.postPaintPv2ClickPoint() != null)
+                + " renamePoint=" + clickPointStatus(config.postPaintRenameClickPoint())
+                + " pv2Transfer=automatic-slot-based"
                 + " " + batchManager.statusLine() + ".");
+    }
+
+    private String clickPointStatus(RecordedClickPoint point) {
+        return point == null ? "false" : "true(" + point.source() + ")";
+    }
+
+    private void paintingStatus(SessionController.MessageSink sink) {
+        ConfigManager.Config config = configManager.config();
+        PaintingMode mode = config.paintingMode();
+        sink.info("painting type - " + mode.commandName() + " [OK]");
+        switch (mode) {
+            case MANUAL -> {
+                sink.info(readiness("manual assisted item swap - on", config.autoSwapFromInventory()));
+                sink.info(readiness("advance after click - on", config.advanceOnLeftClick() || config.advanceOnRightClick()));
+                sink.info(calibrationReadiness(config));
+                sink.info(readiness("auto swap from inventory", config.autoSwapFromInventory()));
+                sink.info(readiness("images in folder - " + imageCount(), imageCount() > 0));
+            }
+            case AUTO -> {
+                sink.info(readiness("auto speed " + autoPainter.delayTicks(), autoPainter.delayTicks() == 5));
+                sink.info(readiness("auto drag on", autoPainter.dragEnabled()));
+                sink.info(readiness("auto swap from inventory", config.autoSwapFromInventory()));
+                sink.info(calibrationReadiness(config));
+                sink.info(readiness("postpaint on", config.postPaintAutomationEnabled()));
+                sink.info(readiness("recorded rename click", config.postPaintRenameClickPoint() != null));
+                sink.info(readiness("pv2 transfer automatic slot-based", true));
+                sink.info(readiness("images in folder - " + imageCount(), imageCount() > 0));
+                sink.info(readiness("smart off", !config.smartEnabled()));
+                sink.info(readiness("bucket off", !config.bucketEnabled()));
+                sink.info(batchManager.statusLine());
+            }
+            case SMART -> {
+                sink.info(readiness("smart on", config.smartEnabled()));
+                sink.info(readiness("bucket on", config.bucketEnabled()));
+                sink.info(readiness("offhand empty bucket", controller.exactEmptyBucketInOffhand()));
+                sink.info(readiness("basecoat on", config.smartBaseCoatEnabled()));
+                sink.info(readiness("auto speed " + autoPainter.delayTicks(), autoPainter.delayTicks() == 5));
+                sink.info(readiness("auto drag fallback on", autoPainter.dragEnabled()));
+                sink.info(readiness("auto swap from inventory", config.autoSwapFromInventory()));
+                sink.info(calibrationReadiness(config));
+                sink.info(readiness("postpaint on", config.postPaintAutomationEnabled()));
+                sink.info(readiness("recorded rename click", config.postPaintRenameClickPoint() != null));
+                sink.info(readiness("pv2 transfer automatic slot-based", true));
+                sink.info(readiness("images in folder - " + imageCount(), imageCount() > 0));
+                sink.info(batchManager.statusLine());
+                sink.info(smartPainter.status(config));
+            }
+        }
+        controller.status(sink);
+    }
+
+    private String readiness(String label, boolean ready) {
+        return label + (ready ? " [OK]" : " [MISSING]");
+    }
+
+    private String calibrationReadiness(ConfigManager.Config config) {
+        String loaded = calibrationManager.calibration().loadedExactName();
+        boolean bundledSelected = loaded != null
+                && loaded.startsWith(config.defaultBundledCalibrationPrefix() + "_")
+                && "bundled".equals(calibrationManager.activeCalibrationSourceLabel());
+        boolean selectedLoaded = loaded != null && (loaded.equals(config.selectedCalibrationName()) || bundledSelected);
+        String loadedText = loaded == null ? "none" : loaded;
+        return readiness("selected calibration " + config.selectedCalibrationName()
+                + " loaded exact " + loadedText
+                + " source " + calibrationManager.activeCalibrationSourceLabel()
+                + " direction " + calibrationManager.activeCalibrationDirectionLabel(),
+                selectedLoaded && calibrationManager.hasUsableCalibration(config));
+    }
+
+    private long imageCount() {
+        try (Stream<Path> paths = Files.list(configManager.importsPath())) {
+            return paths.filter(path -> Files.isRegularFile(path)
+                    && path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".png")).count();
+        } catch (IOException e) {
+            return 0L;
+        }
+    }
+
+    private void handleAndroid(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 2) {
+            sink.error("Usage: #painting android status|testinput");
+            return;
+        }
+        switch (parts[1].toLowerCase()) {
+            case "status" -> androidStatus(sink);
+            case "testinput" -> androidTestInput(sink);
+            default -> sink.error("Usage: #painting android status|testinput");
+        }
+    }
+
+    private void androidStatus(SessionController.MessageSink sink) {
+        ConfigManager.Config config = configManager.config();
+        sink.info("Minecraft=" + SharedConstants.getGameVersion().getName()
+                + " Java=" + System.getProperty("java.version", "unknown")
+                + " OS=" + System.getProperty("os.name", "unknown")
+                + " fabricApiLoaded=" + FabricLoader.getInstance().isModLoaded("fabric-api")
+                + " selectedCalibration=" + config.selectedCalibrationName()
+                + " portableExactCalibration=" + config.portableExactCalibrationMode());
+        paths(sink);
+    }
+
+    private void androidTestInput(SessionController.MessageSink sink) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        String screen = client.currentScreen == null ? "none" : client.currentScreen.getClass().getSimpleName();
+        try {
+            double[] x = new double[1];
+            double[] y = new double[1];
+            GLFW.glfwGetCursorPos(client.getWindow().getHandle(), x, y);
+            double scaledX = x[0] * client.getWindow().getScaledWidth() / client.getWindow().getWidth();
+            double scaledY = y[0] * client.getWindow().getScaledHeight() / client.getWindow().getHeight();
+            sink.info("Input test: screen=" + screen
+                    + " scaledWindow=" + client.getWindow().getScaledWidth() + "x" + client.getWindow().getScaledHeight()
+                    + " cursor=" + Math.round(scaledX) + "," + Math.round(scaledY)
+                    + " guiRecorderArmed=" + guiClickRecorder.armed() + ".");
+        } catch (RuntimeException e) {
+            sink.error("Input test failed: " + e.getMessage());
+        }
+    }
+
+    private void handleCalibrationPortable(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 3 || !parts[1].equalsIgnoreCase("portable")) {
+            sink.error("Usage: #painting calibration portable on|off|status");
+            return;
+        }
+        switch (parts[2].toLowerCase()) {
+            case "on" -> {
+                configManager.setPortableExactCalibrationMode(true, text -> sink.error(text.getString()));
+                sink.error("Portable calibration mode enabled. Verify aim with #painting cal test before painting.");
+            }
+            case "off" -> {
+                configManager.setPortableExactCalibrationMode(false, text -> sink.error(text.getString()));
+                sink.info("Portable calibration mode disabled.");
+            }
+            case "status" -> sink.info("Portable exact calibration mode=" + configManager.config().portableExactCalibrationMode() + ".");
+            default -> sink.error("Usage: #painting calibration portable on|off|status");
+        }
+    }
+
+    private void paths(SessionController.MessageSink sink) {
+        FabricLoader loader = FabricLoader.getInstance();
+        sink.info("Game dir: " + loader.getGameDir());
+        sink.info("Config dir: " + loader.getConfigDir());
+        sink.info("ArtMap config: " + configManager.configPath());
+        sink.info("PNG imports: " + configManager.importsPath());
+        sink.info("Calibrations: " + configManager.calibrationsPath());
     }
 
     private void handleBatch(String[] parts, SessionController.MessageSink sink) {
@@ -171,10 +413,15 @@ public final class HashCommandHandler {
         }
         switch (parts[1].toLowerCase()) {
             case "start" -> {
+                if (!configManager.config().paintingMode().allowsBatch()) {
+                    sink.error("Batch requires painting type auto or smart. Run #painting set auto or #painting set smart first.");
+                    return;
+                }
                 if (parts.length < 5) {
                     sink.error("Usage: #painting batch start <first> <last> <nameSuffix>");
                     return;
                 }
+                stopPaintersBeforeSessionReplace(sink);
                 try {
                     int first = Integer.parseInt(parts[2]);
                     int last = Integer.parseInt(parts[3]);
@@ -184,7 +431,13 @@ public final class HashCommandHandler {
                     sink.error("Batch first and last values must be numbers.");
                 }
             }
-            case "continue" -> batchManager.continueBatch(sink);
+            case "continue" -> {
+                if (!configManager.config().paintingMode().allowsBatch()) {
+                    sink.error("Batch requires painting type auto or smart. Run #painting set auto or #painting set smart first.");
+                    return;
+                }
+                batchManager.continueBatch(sink);
+            }
             case "status" -> batchManager.status(sink);
             case "stop" -> batchManager.stop(sink);
             default -> sink.error("Usage: #painting batch start <first> <last> <nameSuffix>|continue|status|stop");
@@ -348,15 +601,246 @@ public final class HashCommandHandler {
             return;
         }
         switch (parts[1].toLowerCase()) {
-            case "start", "full" -> autoPainter.start(configManager.config(), sink);
-            case "stop" -> autoPainter.stop(sink);
-            case "pause" -> autoPainter.pause(sink);
-            case "resume" -> autoPainter.resume(sink);
-            case "status" -> sink.info(autoPainter.status(configManager.config()));
+            case "start", "full" -> startAutoOrSmart(sink);
+            case "stop" -> {
+                if (smartPainter.running()) {
+                    smartPainter.stop(sink);
+                }
+                autoPainter.stop(sink);
+            }
+            case "pause" -> {
+                smartPainter.pause(sink);
+                autoPainter.pause(sink);
+            }
+            case "resume" -> {
+                smartPainter.resume(sink);
+                autoPainter.resume(sink);
+            }
+            case "status" -> {
+                sink.info(autoPainter.status(configManager.config()));
+                sink.info(smartPainter.status(configManager.config()));
+                sink.info(calibrationManager.activeCalibrationStatusLine());
+            }
             case "speed" -> handleAutoSpeed(parts, sink);
             case "drag" -> handleAutoDrag(parts, sink);
             default -> sink.error("Usage: #painting auto start|stop|pause|resume|status|speed <ticks>|drag on|off|status");
         }
+    }
+
+    private void startAutoOrSmart(SessionController.MessageSink sink) {
+        ConfigManager.Config config = configManager.config();
+        switch (config.paintingMode()) {
+            case MANUAL -> startManualAssist(sink);
+            case AUTO -> {
+                if (controller.session() == null) {
+                    sink.error("No active painting session. Start with #painting <image.png> first.");
+                    return;
+                }
+                if (smartPainter.running()) {
+                    smartPainter.stop(sink);
+                }
+                if (!calibrationManager.prepareBundledDirectionalCalibration(config, sink)) {
+                    return;
+                }
+                autoPainter.start(config, sink);
+            }
+            case SMART -> {
+                if (controller.session() == null) {
+                    sink.error("No active painting session. Start with #painting <image.png> first.");
+                    return;
+                }
+                if (!calibrationManager.prepareBundledDirectionalCalibration(config, sink)) {
+                    return;
+                }
+                if (smartPainter.start(config, sink)) {
+                    if (autoPainter.running()) {
+                        autoPainter.stop(sink);
+                    }
+                } else {
+                    autoPainter.start(config, sink);
+                }
+            }
+        }
+    }
+
+    private void startManualAssist(SessionController.MessageSink sink) {
+        if (smartPainter.running()) {
+            smartPainter.stop(sink);
+        }
+        if (autoPainter.running()) {
+            autoPainter.stop(sink);
+        }
+        if (controller.session() == null) {
+            sink.error("No active painting session. Start with #painting <image.png> first.");
+            return;
+        }
+        controller.switchCurrentNow(sink);
+        sink.info("Manual assisted painting ready. The mod will swap to the next color after each allowed user click.");
+    }
+
+    private void startImage(String filename, SessionController.MessageSink sink) {
+        stopPaintersBeforeSessionReplace(sink);
+        controller.start(filename, sink);
+    }
+
+    private void stopPaintersBeforeSessionReplace(SessionController.MessageSink sink) {
+        if (smartPainter.running()) {
+            smartPainter.stop(sink);
+        }
+        if (autoPainter.running()) {
+            autoPainter.stop(sink);
+        }
+    }
+
+    private void handleSmart(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length < 2) {
+            sink.error("Usage: #painting smart on|off|status|preview|basecoat on|off|threshold <number>|dragthreshold <number>");
+            return;
+        }
+        switch (parts[1].toLowerCase()) {
+            case "on" -> {
+                applyPaintingMode(PaintingMode.SMART, sink);
+                sink.info("Smart painting enabled.");
+            }
+            case "off" -> {
+                if (configManager.config().paintingMode() == PaintingMode.SMART) {
+                    applyPaintingMode(PaintingMode.AUTO, sink);
+                } else {
+                    configManager.setSmartEnabled(false, text -> sink.error(text.getString()));
+                }
+                smartPainter.invalidateTrust("smart disabled");
+                sink.info("Smart painting disabled. Old auto remains available.");
+            }
+            case "status" -> sink.info(smartPainter.status(configManager.config()));
+            case "preview" -> {
+                if (configManager.config().paintingMode() != PaintingMode.SMART) {
+                    sink.error("Smart preview only applies to painting type smart. Run #painting set smart first.");
+                    return;
+                }
+                smartPreview(sink);
+            }
+            case "basecoat" -> handleSmartBasecoat(parts, sink);
+            case "threshold" -> handleSmartThreshold(parts, sink);
+            case "dragthreshold" -> handleSmartDragThreshold(parts, sink);
+            default -> sink.error("Usage: #painting smart on|off|status|preview|basecoat on|off|threshold <number>|dragthreshold <number>");
+        }
+    }
+
+    private void handleSmartBasecoat(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 3) {
+            sink.error("Usage: #painting smart basecoat on|off");
+            return;
+        }
+        switch (parts[2].toLowerCase()) {
+            case "on" -> {
+                configManager.setSmartBaseCoatEnabled(true, text -> sink.error(text.getString()));
+                sink.info("Smart basecoat enabled.");
+            }
+            case "off" -> {
+                configManager.setSmartBaseCoatEnabled(false, text -> sink.error(text.getString()));
+                sink.info("Smart basecoat disabled.");
+            }
+            default -> sink.error("Usage: #painting smart basecoat on|off");
+        }
+    }
+
+    private void handleSmartThreshold(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 3) {
+            sink.error("Usage: #painting smart threshold <number>");
+            return;
+        }
+        try {
+            int value = Integer.parseInt(parts[2]);
+            configManager.setSmartBucketThreshold(value, text -> sink.error(text.getString()));
+            sink.info("Smart bucket threshold set to " + Math.max(2, value) + " pixels.");
+        } catch (NumberFormatException e) {
+            sink.error("Smart threshold must be a number.");
+        }
+    }
+
+    private void handleSmartDragThreshold(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 3) {
+            sink.error("Usage: #painting smart dragthreshold <number>");
+            return;
+        }
+        try {
+            int value = Integer.parseInt(parts[2]);
+            configManager.setSmartDragThreshold(value, text -> sink.error(text.getString()));
+            sink.info("Smart drag threshold set to " + Math.max(2, value) + " pixels.");
+        } catch (NumberFormatException e) {
+            sink.error("Smart drag threshold must be a number.");
+        }
+    }
+
+    private void smartPreview(SessionController.MessageSink sink) {
+        SmartPreview preview = smartPainter.preview(configManager.config());
+        if (preview == null) {
+            sink.error("No active painting session. Start with #painting <image.png> first.");
+            return;
+        }
+        sink.info(preview.summary());
+    }
+
+    private void handleBucket(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length < 2) {
+            sink.error("Usage: #painting bucket on|off|status|preview|repeats <number>|gap <ticks>|swapdelay <ticks>|afterdelay <ticks>");
+            return;
+        }
+        String bucketCommand = parts[1].toLowerCase(Locale.ROOT);
+        if (!bucketCommand.equals("status") && !configManager.config().paintingMode().allowsBucketConfig()) {
+            sink.error("Bucket only works in painting type smart. Run #painting set smart first.");
+            return;
+        }
+        switch (bucketCommand) {
+            case "on" -> {
+                configManager.setBucketEnabled(true, text -> sink.error(text.getString()));
+                sink.info("Smart bucket actions enabled.");
+            }
+            case "off" -> {
+                configManager.setBucketEnabled(false, text -> sink.error(text.getString()));
+                smartPainter.invalidateTrust("bucket disabled");
+                sink.info("Smart bucket actions disabled.");
+            }
+            case "status" -> bucketStatus(sink);
+            case "preview" -> smartPreview(sink);
+            case "repeats" -> handleBucketNumber(parts, "repeats", sink);
+            case "gap" -> handleBucketNumber(parts, "gap", sink);
+            case "swapdelay" -> handleBucketNumber(parts, "swapdelay", sink);
+            case "afterdelay" -> handleBucketNumber(parts, "afterdelay", sink);
+            default -> sink.error("Usage: #painting bucket on|off|status|preview|repeats <number>|gap <ticks>|swapdelay <ticks>|afterdelay <ticks>");
+        }
+    }
+
+    private void handleBucketNumber(String[] parts, String key, SessionController.MessageSink sink) {
+        if (parts.length != 3) {
+            sink.error("Usage: #painting bucket " + key + " <number>");
+            return;
+        }
+        try {
+            int value = Integer.parseInt(parts[2]);
+            switch (key) {
+                case "repeats" -> configManager.setBucketClickRepeats(value, text -> sink.error(text.getString()));
+                case "gap" -> configManager.setBucketClickGapTicks(value, text -> sink.error(text.getString()));
+                case "swapdelay" -> configManager.setBucketSwapDelayTicks(value, text -> sink.error(text.getString()));
+                case "afterdelay" -> configManager.setBucketAfterDelayTicks(value, text -> sink.error(text.getString()));
+                default -> {
+                }
+            }
+            sink.info("Bucket " + key + " updated.");
+        } catch (NumberFormatException e) {
+            sink.error("Bucket " + key + " must be a number.");
+        }
+    }
+
+    private void bucketStatus(SessionController.MessageSink sink) {
+        ConfigManager.Config config = configManager.config();
+        sink.info("Bucket enabled=" + config.bucketEnabled()
+                + " repeats=" + config.bucketClickRepeats()
+                + " gap=" + config.bucketClickGapTicks()
+                + " swapDelay=" + config.bucketSwapDelayTicks()
+                + " aimSettle=" + config.bucketAimSettleTicks()
+                + " afterDelay=" + config.bucketAfterDelayTicks()
+                + " offhandExactEmptyBucket=" + controller.exactEmptyBucketInOffhand() + ".");
     }
 
     private void handleAutoDrag(String[] parts, SessionController.MessageSink sink) {
@@ -364,9 +848,19 @@ public final class HashCommandHandler {
             sink.error("Usage: #painting auto drag on|off|status");
             return;
         }
+        if (!parts[2].equalsIgnoreCase("status") && !configManager.config().paintingMode().allowsAutoDragConfig()) {
+            sink.error("Auto drag is disabled in painting type manual because clicks are manual. Run #painting set auto or #painting set smart first.");
+            return;
+        }
         switch (parts[2].toLowerCase()) {
-            case "on" -> autoPainter.setDragEnabled(true, sink);
-            case "off" -> autoPainter.setDragEnabled(false, sink);
+            case "on" -> {
+                configManager.setAutoDragSameColorRuns(true, text -> sink.error(text.getString()));
+                autoPainter.setDragEnabled(true, sink);
+            }
+            case "off" -> {
+                configManager.setAutoDragSameColorRuns(false, text -> sink.error(text.getString()));
+                autoPainter.setDragEnabled(false, sink);
+            }
             case "status" -> sink.info(autoPainter.status());
             default -> sink.error("Usage: #painting auto drag on|off|status");
         }
@@ -405,6 +899,12 @@ public final class HashCommandHandler {
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting auto")) {
             helpLine(sink, "#painting auto " + entry.command(), entry.description());
         }
+        for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting smart")) {
+            helpLine(sink, "#painting smart " + entry.command(), entry.description());
+        }
+        for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting bucket")) {
+            helpLine(sink, "#painting bucket " + entry.command(), entry.description());
+        }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting palette")) {
             helpLine(sink, "#painting palette " + entry.command(), entry.description());
         }
@@ -419,6 +919,12 @@ public final class HashCommandHandler {
         }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting pv2")) {
             helpLine(sink, "#painting pv2 " + entry.command(), entry.description());
+        }
+        for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting android")) {
+            helpLine(sink, "#painting android " + entry.command(), entry.description());
+        }
+        for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting calibration")) {
+            helpLine(sink, "#painting calibration " + entry.command(), entry.description());
         }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting calibrate")) {
             helpLine(sink, "#painting calibrate " + entry.command(), entry.description());

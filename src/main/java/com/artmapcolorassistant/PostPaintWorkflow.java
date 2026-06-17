@@ -1,7 +1,6 @@
 package com.artmapcolorassistant;
 
 import com.artmapcolorassistant.mixin.GameRendererInvoker;
-import com.artmapcolorassistant.mixin.HandledScreenInvoker;
 import com.artmapcolorassistant.mixin.MinecraftClientInvoker;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ChatScreen;
@@ -24,6 +23,7 @@ public final class PostPaintWorkflow {
     private static final int SCREEN_TIMEOUT_TICKS = 120;
     private static final int ITEM_TIMEOUT_TICKS = 120;
     private static final int SHORT_WAIT_TICKS = 8;
+    private static final int PV2_SLOT_ACTION_DELAY_TICKS = 20;
 
     private final MinecraftClient client;
     private final CalibrationManager calibrationManager;
@@ -38,6 +38,7 @@ public final class PostPaintWorkflow {
     private int funJumpPressTicksRemaining;
     private int funJumpGapTicksRemaining;
     private boolean funJumpKeyHeld;
+    private ItemStack pendingPv2TransferStack = ItemStack.EMPTY;
     private Phase phase = Phase.IDLE;
 
     public PostPaintWorkflow(MinecraftClient client, CalibrationManager calibrationManager) {
@@ -68,6 +69,7 @@ public final class PostPaintWorkflow {
         this.funJumpPressTicksRemaining = 0;
         this.funJumpGapTicksRemaining = 0;
         this.funJumpKeyHeld = false;
+        this.pendingPv2TransferStack = ItemStack.EMPTY;
         this.phase = Phase.SELECT_SAVE_ITEM;
         sink.info("Post-paint automation started for save name \"" + saveName() + "\".");
     }
@@ -82,6 +84,7 @@ public final class PostPaintWorkflow {
         funJumpsRemaining = 0;
         funJumpPressTicksRemaining = 0;
         funJumpGapTicksRemaining = 0;
+        pendingPv2TransferStack = ItemStack.EMPTY;
         phase = Phase.IDLE;
     }
 
@@ -104,7 +107,7 @@ public final class PostPaintWorkflow {
             case WAIT_FINISHED_ITEM -> waitFinishedItem(config, sink);
             case OPEN_PV2 -> openPv2(config, sink);
             case WAIT_PV2_SCREEN -> waitPv2Screen(sink);
-            case SHIFT_CLICK_PV2_POINT -> shiftClickPv2Point(config, sink);
+            case QUICK_MOVE_FINISHED_ITEM -> quickMoveFinishedItem(config, sink);
             case WAIT_FINISHED_ITEM_REMOVED -> waitFinishedItemRemoved(config, sink);
             case CLOSE_PV2 -> closePv2(sink);
             case SELECT_BLANK_CANVAS -> selectBlankCanvas(config, sink);
@@ -322,8 +325,8 @@ public final class PostPaintWorkflow {
 
     private void waitPv2Screen(SessionController.MessageSink sink) {
         if (client.currentScreen instanceof HandledScreen<?>) {
-            phase = Phase.SHIFT_CLICK_PV2_POINT;
-            waitTicks = SHORT_WAIT_TICKS;
+            phase = Phase.QUICK_MOVE_FINISHED_ITEM;
+            waitTicks = PV2_SLOT_ACTION_DELAY_TICKS;
             return;
         }
         if (--timeoutTicks <= 0) {
@@ -331,37 +334,40 @@ public final class PostPaintWorkflow {
         }
     }
 
-    private void shiftClickPv2Point(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!(client.currentScreen instanceof HandledScreen<?> screen) || client.interactionManager == null || client.player == null) {
-            fail(sink, "PV2 vault screen is not open for the recorded shift-click.");
+    private void quickMoveFinishedItem(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (!(client.currentScreen instanceof HandledScreen<?>) || client.interactionManager == null || client.player == null) {
+            fail(sink, "PV2 vault screen is not open for automatic slot transfer.");
             return;
         }
-        RecordedClickPoint point = config.postPaintPv2ClickPoint();
-        if (point == null) {
-            fail(sink, "Run #painting pv2 click, then Shift-click the finished item location in /pv 2.");
+        ItemStack sourceStack = hotbarStack(config.postPaintFinishedHotbarSlot());
+        if (sourceStack.isEmpty()) {
+            fail(sink, "Finished canvas is missing from hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1) + " before PV2 transfer.");
             return;
         }
-        Slot slot = ((HandledScreenInvoker) screen).artmapColorAssistant$getSlotAt(
-                point.replayX(client.getWindow().getScaledWidth()),
-                point.replayY(client.getWindow().getScaledHeight())
-        );
+        Slot slot = playerHotbarScreenSlot(config.postPaintFinishedHotbarSlot());
         if (slot == null) {
-            fail(sink, "Recorded PV2 click point is not over a slot. Re-record with #painting pv2 click.");
+            fail(sink, "Could not find hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1)
+                    + " in the open PV2 screen handler.");
             return;
         }
+        pendingPv2TransferStack = sourceStack.copy();
         client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, slot.id, 0, SlotActionType.QUICK_MOVE, client.player);
-        timeoutTicks = ITEM_TIMEOUT_TICKS;
+        waitTicks = PV2_SLOT_ACTION_DELAY_TICKS;
+        timeoutTicks = 1;
         phase = Phase.WAIT_FINISHED_ITEM_REMOVED;
     }
 
     private void waitFinishedItemRemoved(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (!hotbarNonEmpty(config.postPaintFinishedHotbarSlot())) {
+            pendingPv2TransferStack = ItemStack.EMPTY;
             phase = Phase.CLOSE_PV2;
-            waitTicks = SHORT_WAIT_TICKS;
             return;
         }
         if (--timeoutTicks <= 0) {
-            fail(sink, "Finished canvas stayed in hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1) + ". Vault may be full or click point is wrong.");
+            String itemName = pendingPv2TransferStack.isEmpty() ? "item" : pendingPv2TransferStack.getName().getString();
+            fail(sink, "Finished canvas stayed in hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1)
+                    + " after automatic PV2 transfer. PV2 may be full. Store \"" + itemName
+                    + "\" manually, then continue the batch.");
         }
     }
 
@@ -488,12 +494,29 @@ public final class PostPaintWorkflow {
     }
 
     private boolean hotbarNonEmpty(int slot) {
+        return !hotbarStack(slot).isEmpty();
+    }
+
+    private ItemStack hotbarStack(int slot) {
         ClientPlayerEntity player = client.player;
         if (player == null || slot < 0 || slot > 8 || slot >= player.getInventory().main.size()) {
-            return false;
+            return ItemStack.EMPTY;
         }
         ItemStack stack = player.getInventory().main.get(slot);
-        return stack != null && !stack.isEmpty();
+        return stack == null ? ItemStack.EMPTY : stack;
+    }
+
+    private Slot playerHotbarScreenSlot(int hotbarSlot) {
+        ClientPlayerEntity player = client.player;
+        if (player == null || hotbarSlot < 0 || hotbarSlot > 8) {
+            return null;
+        }
+        for (Slot slot : player.currentScreenHandler.slots) {
+            if (slot.inventory == player.getInventory() && slot.getIndex() == hotbarSlot) {
+                return slot;
+            }
+        }
+        return null;
     }
 
     private String saveName() {
@@ -537,7 +560,7 @@ public final class PostPaintWorkflow {
         WAIT_FINISHED_ITEM,
         OPEN_PV2,
         WAIT_PV2_SCREEN,
-        SHIFT_CLICK_PV2_POINT,
+        QUICK_MOVE_FINISHED_ITEM,
         WAIT_FINISHED_ITEM_REMOVED,
         CLOSE_PV2,
         SELECT_BLANK_CANVAS,

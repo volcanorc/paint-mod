@@ -4,6 +4,8 @@ public final class BatchManager {
     private final ConfigManager configManager;
     private final SessionController controller;
     private final AutoPainter autoPainter;
+    private final SmartPainter smartPainter;
+    private final CalibrationManager calibrationManager;
     private final PostPaintWorkflow postPaintWorkflow;
     private boolean active;
     private boolean paintingActive;
@@ -15,14 +17,21 @@ public final class BatchManager {
     private String activeFilename;
 
     public BatchManager(ConfigManager configManager, SessionController controller, AutoPainter autoPainter,
+                        SmartPainter smartPainter, CalibrationManager calibrationManager,
                         PostPaintWorkflow postPaintWorkflow) {
         this.configManager = configManager;
         this.controller = controller;
         this.autoPainter = autoPainter;
+        this.smartPainter = smartPainter;
+        this.calibrationManager = calibrationManager;
         this.postPaintWorkflow = postPaintWorkflow;
     }
 
     public void start(int first, int last, String suffix, SessionController.MessageSink sink) {
+        if (!configManager.config().paintingMode().allowsBatch()) {
+            sink.error("Batch requires painting type auto or smart. Run #painting set auto or #painting set smart first.");
+            return;
+        }
         if (first <= 0 || last < first) {
             sink.error("Usage: #painting batch start <first> <last> <nameSuffix>");
             return;
@@ -40,11 +49,15 @@ public final class BatchManager {
     }
 
     public void continueBatch(SessionController.MessageSink sink) {
+        if (!configManager.config().paintingMode().allowsBatch()) {
+            sink.error("Batch requires painting type auto or smart. Run #painting set auto or #painting set smart first.");
+            return;
+        }
         if (!active) {
             sink.error("No batch is active. Use #painting batch start <first> <last> <nameSuffix>.");
             return;
         }
-        if (paintingActive) {
+        if (paintingActive || autoPainter.running() || smartPainter.running()) {
             sink.error("Batch is already painting " + activeFilename + ".");
             return;
         }
@@ -96,7 +109,7 @@ public final class BatchManager {
             tickPostPaint(sink);
             return;
         }
-        if (controller.session() != null || autoPainter.running()) {
+        if (controller.session() != null || autoPainter.running() || smartPainter.running()) {
             return;
         }
         String completedFilename = activeFilename == null ? (current + ".png") : activeFilename;
@@ -130,6 +143,12 @@ public final class BatchManager {
             return;
         }
         ConfigManager.Config config = configManager.config();
+        if (!config.paintingMode().allowsBatch()) {
+            paintingActive = false;
+            waitingForSetup = true;
+            sink.error("Batch requires painting type auto or smart. Run #painting set auto or #painting set smart first.");
+            return;
+        }
         String filename = nextFilename();
         activeFilename = filename;
         boolean started = controller.start(filename, sink);
@@ -143,8 +162,8 @@ public final class BatchManager {
         autoPainter.setSpeed(batchSpeed, config, sink);
         autoPainter.setDragEnabled(config.batchEnableDrag(), sink);
         if (config.batchAutoStartAfterContinue()) {
-            autoPainter.start(config, sink);
-            if (!autoPainter.running()) {
+            boolean paintStarted = startConfiguredPainter(config, sink);
+            if (!paintStarted) {
                 paintingActive = false;
                 waitingForSetup = true;
                 sink.error("Batch loaded " + filename + " but auto paint did not start. Fix setup, then run #painting batch continue.");
@@ -153,6 +172,27 @@ public final class BatchManager {
         }
         paintingActive = true;
         waitingForSetup = false;
+    }
+
+    private boolean startConfiguredPainter(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (!calibrationManager.prepareBundledDirectionalCalibration(config, sink)) {
+            return false;
+        }
+        if (config.paintingMode() == PaintingMode.SMART) {
+            if (smartPainter.start(config, sink)) {
+                if (autoPainter.running()) {
+                    autoPainter.stop(sink);
+                }
+                return true;
+            }
+            autoPainter.start(config, sink);
+            return autoPainter.running();
+        }
+        if (smartPainter.running()) {
+            smartPainter.stop(sink);
+        }
+        autoPainter.start(config, sink);
+        return autoPainter.running();
     }
 
     private void tickPostPaint(SessionController.MessageSink sink) {

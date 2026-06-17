@@ -8,16 +8,22 @@ public final class CommandGuide {
     private static final List<Entry> ROOT = List.of(
             new Entry("help", "Show clickable help."),
             new Entry("gui", "Open client controls."),
+            new Entry("paths", "Show import and calibration folders."),
+            new Entry("set manual|auto|smart", "Choose painting type."),
+            new Entry("android", "Android/Pojav diagnostics."),
             new Entry("<file.png>", "Start an imported image."),
             new Entry("dryrun <file.png>", "Analyze without painting."),
             new Entry("palette", "Inspect color matching."),
             new Entry("batch", "Paint numbered image queue."),
             new Entry("postpaint", "Post-paint save/vault setup."),
             new Entry("rename", "Record save GUI click."),
-            new Entry("pv2", "Record vault shift-click."),
+            new Entry("pv2", "Legacy vault click point controls."),
             new Entry("full", "Start full auto."),
             new Entry("auto", "Auto painting controls."),
+            new Entry("smart", "Smart hybrid painting controls."),
+            new Entry("bucket", "Smart bucket timing and guard controls."),
             new Entry("calibrate", "Exact calibration controls."),
+            new Entry("calibration", "Portable calibration mode."),
             new Entry("cal", "Corner calibration and aim test."),
             new Entry("usecalibration <name>", "Load a saved calibration."),
             new Entry("status", "Show current status.")
@@ -31,6 +37,25 @@ public final class CommandGuide {
             new Entry("status", "Show auto status."),
             new Entry("speed <ticks>", "Set auto delay."),
             new Entry("drag on|off|status", "Control row dragging.")
+    );
+    private static final List<Entry> SMART = List.of(
+            new Entry("on", "Enable smart hybrid auto."),
+            new Entry("off", "Disable smart hybrid auto."),
+            new Entry("status", "Show smart state."),
+            new Entry("preview", "Estimate smart route without painting."),
+            new Entry("basecoat on|off", "Control dominant-color basecoat."),
+            new Entry("threshold <number>", "Set minimum bucket region."),
+            new Entry("dragthreshold <number>", "Set minimum smart drag run.")
+    );
+    private static final List<Entry> BUCKET = List.of(
+            new Entry("on", "Enable smart bucket fills."),
+            new Entry("off", "Disable smart bucket fills."),
+            new Entry("status", "Show bucket guard/timing."),
+            new Entry("preview", "Estimate smart bucket route."),
+            new Entry("repeats <number>", "Set right-click repeats."),
+            new Entry("gap <ticks>", "Set repeat gap."),
+            new Entry("swapdelay <ticks>", "Set pre-bucket delay."),
+            new Entry("afterdelay <ticks>", "Set post-bucket delay.")
     );
     private static final List<Entry> PALETTE = List.of(
             new Entry("status", "Show loaded and usable colors."),
@@ -53,8 +78,17 @@ public final class CommandGuide {
             new Entry("clear", "Clear save GUI click point.")
     );
     private static final List<Entry> PV2 = List.of(
-            new Entry("click", "Record vault shift-click point."),
-            new Entry("clear", "Clear vault click point.")
+            new Entry("click", "Legacy only; automatic slot transfer is default."),
+            new Entry("clear", "Clear legacy vault click point.")
+    );
+    private static final List<Entry> ANDROID = List.of(
+            new Entry("status", "Show Android/Pojav paths and runtime."),
+            new Entry("testinput", "Check cursor/touch capture.")
+    );
+    private static final List<Entry> CALIBRATION = List.of(
+            new Entry("portable on", "Allow transferred exact calibration."),
+            new Entry("portable off", "Require same eye position."),
+            new Entry("portable status", "Show portable mode.")
     );
     private static final List<Entry> CALIBRATE = List.of(
             new Entry("start <name>", "Start fresh unsaved calibration."),
@@ -88,6 +122,12 @@ public final class CommandGuide {
         if (lower.startsWith("auto")) {
             return AUTO;
         }
+        if (lower.startsWith("smart")) {
+            return SMART;
+        }
+        if (lower.startsWith("bucket")) {
+            return BUCKET;
+        }
         if (lower.startsWith("palette")) {
             return PALETTE;
         }
@@ -102,6 +142,12 @@ public final class CommandGuide {
         }
         if (lower.startsWith("pv2")) {
             return PV2;
+        }
+        if (lower.startsWith("android")) {
+            return ANDROID;
+        }
+        if (lower.startsWith("calibration")) {
+            return CALIBRATION;
         }
         if (lower.startsWith("calibrate")) {
             return CALIBRATE;
@@ -134,6 +180,12 @@ public final class CommandGuide {
         if (normalized.startsWith("auto")) {
             return prefixed("#painting auto ", AUTO, normalized.substring("auto".length()).trim());
         }
+        if (normalized.startsWith("smart")) {
+            return prefixed("#painting smart ", SMART, normalized.substring("smart".length()).trim());
+        }
+        if (normalized.startsWith("bucket")) {
+            return prefixed("#painting bucket ", BUCKET, normalized.substring("bucket".length()).trim());
+        }
         if (normalized.startsWith("palette")) {
             return prefixed("#painting palette ", PALETTE, normalized.substring("palette".length()).trim());
         }
@@ -148,6 +200,12 @@ public final class CommandGuide {
         }
         if (normalized.startsWith("pv2")) {
             return prefixed("#painting pv2 ", PV2, normalized.substring("pv2".length()).trim());
+        }
+        if (normalized.startsWith("android")) {
+            return prefixed("#painting android ", ANDROID, normalized.substring("android".length()).trim());
+        }
+        if (normalized.startsWith("calibration")) {
+            return prefixed("#painting calibration ", CALIBRATION, normalized.substring("calibration".length()).trim());
         }
         if (normalized.startsWith("calibrate")) {
             return prefixed("#painting calibrate ", CALIBRATE, normalized.substring("calibrate".length()).trim());

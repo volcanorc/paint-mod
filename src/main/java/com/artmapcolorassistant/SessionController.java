@@ -303,6 +303,33 @@ public final class SessionController {
         }
     }
 
+    public boolean selectStepNow(PaintStep step, MessageSink sink) {
+        if (step == null || step.skip()) {
+            return true;
+        }
+        if (step.matchedColor() != null && !inventoryHelper.itemExists(step.matchedColor())) {
+            pauseForWarning(InventoryHelper.missingMessage(step), sink);
+            return false;
+        }
+        InventoryHelper.SwitchResult result = inventoryHelper.selectOrSwap(step, configManager.config(), text -> sink.info(text.getString()));
+        if (!result.success() && !result.pending()) {
+            pauseForWarning(result.message(), sink);
+            return false;
+        }
+        if (session != null && result.success()) {
+            session.clearWarning();
+        }
+        return true;
+    }
+
+    public boolean exactEmptyBucketInOffhand() {
+        return inventoryHelper.exactEmptyBucketInOffhand();
+    }
+
+    public void finishSmart(MessageSink sink) {
+        finish(sink);
+    }
+
     public boolean currentItemStillAvailable() {
         if (session == null || session.currentStep() == null || session.currentStep().matchedColor() == null) {
             return true;

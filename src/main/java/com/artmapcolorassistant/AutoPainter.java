@@ -82,10 +82,13 @@ public final class AutoPainter {
             sink.error("Auto paint needs calibration first. Use #painting usecalibration <name> or #painting calibrate start <name>.");
             return;
         }
-        String movementWarning = calibrationManager.movementWarning();
+        String movementWarning = calibrationManager.movementWarning(config);
         if (movementWarning != null) {
             sink.error(movementWarning);
             return;
+        }
+        if (config.portableExactCalibrationMode() && calibrationManager.usingExactCalibration()) {
+            sink.error("Portable calibration mode is enabled. Verify aim with #painting cal test before painting.");
         }
         running = true;
         paused = false;

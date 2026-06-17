@@ -91,7 +91,7 @@ public final class InventoryHelper {
         if (!canSwapNow()) {
             return SwitchResult.failed("Required item " + color.item() + " is not in the hotbar and a GUI/container is open. Put it in the hotbar.");
         }
-        int reserved = config.reservedHotbarSlot();
+        int reserved = safeReservedHotbarSlot(config.reservedHotbarSlot());
         int screenSlot = mainSlot.getAsInt();
         if (client.interactionManager == null) {
             return SwitchResult.failed("Cannot swap inventory item: no interaction manager.");
@@ -137,8 +137,27 @@ public final class InventoryHelper {
                 || (color.legacyItem() != null && snapshot.availableItemIds().contains(color.legacyItem()));
     }
 
+    public boolean exactEmptyBucketInOffhand() {
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return false;
+        }
+        ItemStack stack = player.getOffHandStack();
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        return Identifier.of("minecraft", "bucket").equals(Registries.ITEM.getId(stack.getItem()));
+    }
+
     private boolean canSwapNow() {
         return client.currentScreen == null || client.currentScreen instanceof ChatScreen;
+    }
+
+    private int safeReservedHotbarSlot(int configured) {
+        if (configured >= 3 && configured <= 8) {
+            return configured;
+        }
+        return 8;
     }
 
     private boolean matches(ItemStack stack, ArtMapColor color) {

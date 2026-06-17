@@ -27,6 +27,9 @@ The default emergency stop key is `O`. You can change it in Minecraft under `Opt
 - `#painting <filename.png>` starts a session.
 - `#painting help` shows clickable colored help.
 - `#painting gui` opens a client-only control screen.
+- `#painting paths` shows the exact game/config/import/calibration folders used by the current launcher.
+- `#painting android status` shows Android/Pojav-friendly runtime and folder diagnostics.
+- `#painting android testinput` checks cursor/touch coordinate capture and GUI recorder state.
 - `#painting dryrun <filename.png>` analyzes without starting.
 - `#painting palette status` shows configured, usable, inventory, tool, and match-mode color counts.
 - `#painting palette reds` lists red/pink/maroon configured ArtMap colors currently found in your inventory.
@@ -54,6 +57,7 @@ The default emergency stop key is `O`. You can change it in Minecraft under `Opt
 - `#painting calibrate stop` stops recording without saving.
 - `#painting calibrate reset <name>` deletes the saved calibration file and clears that in-memory recording.
 - `#painting calibrate status`, `clear`.
+- `#painting calibration portable on|off|status` toggles transferred exact-calibration mode.
 - `#painting usecalibration <name>` loads a saved exact calibration file, such as `#painting usecalibration 1`.
 - `#painting full`, `#painting auto full`, and `#painting auto start` start opt-in automated painting from the current session index.
 - `#painting auto stop`, `pause`, `resume`, `status`.
@@ -99,6 +103,10 @@ Exact calibration records the camera direction for every pixel you right-click. 
 Exact per-pixel calibration is used before four-corner interpolation. A partial exact calibration is allowed: auto paint follows the saved direction for each recorded pixel and stops at the first pixel without a recorded point, reporting how many calibrated clicks were completed.
 
 The GUI shows the current selected calibration and includes a calibration picker. The picker lists saved calibration files, shows their progress, lets you use/continue/reset them, and can create a new calibration name. The selected calibration name is stored in config as `selectedCalibrationName`, so it remains the default after restarting Minecraft.
+
+For transferred exact calibrations, such as moving a 1024-point calibration from desktop Java to Android/Pojav, use `#painting calibration portable on` only after loading the calibration and verifying aim with `#painting cal test 0 0` and `#painting cal test 31 31`. Portable mode skips the saved eye-position movement warning for exact calibration yaw/pitch samples, but wrong seat/view position can still aim incorrectly.
+
+Config field: `portableExactCalibrationMode`, default `false`.
 
 ## Auto Paint Speed
 
@@ -187,11 +195,13 @@ Post-paint config:
 
 The recorded rename and PV2 click points are saved in `.minecraft/config/artmap_color_assistant.json`, so they remain after restarting Minecraft. The mod does not warn about missing recorded points at startup or normal auto start; it only warns when post-paint automation reaches the rename or vault step that needs that point.
 
+On Android/Pojav, `rename click` and `pv2 click` prefer actual GUI `mouseClicked` coordinates from the screen. Desktop cursor polling remains as a fallback. `#painting postpaint status` shows whether each point was recorded from `screen` or `cursor`.
+
 For saving, the mod selects hotbar slot 3, waits briefly, aims at calibration index 500, settles the aim, refreshes the crosshair target, then sends the normal Minecraft right-click interaction. If the ArtMap save GUI does not open, it retries before pausing with a clear message.
 
 After placing the next blank canvas, post-paint automation does 5 fun jumps by default, then right-clicks again to enter the easel for the next image. Disable this with `postPaintFunJumpsEnabled: false` or set `postPaintFunJumpCount: 0`.
 
-Post-paint automation does not perform anti-AFK movement. If any step fails, finish the save/store/setup manually, then run `#painting batch continue`.
+The post-paint jumps are optional cosmetic movement only. If any post-paint step fails, finish the save/store/setup manually, then run `#painting batch continue`.
 
 ## Safety And Limits
 
@@ -202,6 +212,28 @@ The mod only scans the usable player inventory: hotbar slots 0-8 and main invent
 Some servers may disallow automation or inventory packet behavior. Check server rules before using auto paint or inventory-to-hotbar swapping. If swapping fails, the session pauses and tells you exactly which item to put in the hotbar.
 
 RGB values in the default ArtMap color table are approximations. Edit the config if your server uses different colors.
+
+## Android / PojavLauncher
+
+This remains a normal Fabric Java mod jar, not an Android APK. Use an Android Java launcher that can run Minecraft Java Edition 1.21.1 with Fabric Loader, Fabric API, and Java 21.
+
+Setup:
+
+1. Install Minecraft Java `1.21.1`, Fabric Loader, and Fabric API in the Android Java launcher.
+2. Put `artmap-color-assistant-1.0.0.jar` in that launcher's `mods` folder.
+3. Launch once, then run `#painting paths`.
+4. Copy PNG files into the printed `PNG imports` folder.
+5. Copy exact calibration JSON files into the printed `Calibrations` folder.
+6. Run `#painting usecalibration <name>`.
+7. Verify aim with `#painting cal test 0 0` and `#painting cal test 31 31`.
+8. If a transferred exact calibration is blocked by the eye-position warning, run `#painting calibration portable on`, then retest aim before painting.
+9. Re-record `#painting rename click` and `#painting pv2 click` on Android because GUI scale and touch layout differ.
+
+Useful diagnostics:
+
+- `#painting android status`
+- `#painting android testinput`
+- `#painting paths`
 
 ## Color Matching And Red Themes
 

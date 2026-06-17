@@ -75,6 +75,10 @@ public final class CanvasCalibration {
         loadedHeight = height;
     }
 
+    public String loadedExactName() {
+        return loadedName;
+    }
+
     public String exactStatus(int width, int height) {
         String name = loadedName == null ? "none" : loadedName;
         String size = loadedWidth > 0 && loadedHeight > 0 ? loadedWidth + "x" + loadedHeight : "unknown";

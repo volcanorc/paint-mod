@@ -40,6 +40,10 @@ public final class ConfigManager {
         return importsPath;
     }
 
+    public Path configPath() {
+        return configPath;
+    }
+
     public Path calibrationsPath() {
         return calibrationsPath;
     }
@@ -99,6 +103,7 @@ public final class ConfigManager {
         ColorMatchMode colorMatchMode = ColorMatchMode.fromString(stringValue(root, "colorMatchMode", defaults.colorMatchMode.name()));
         boolean includeToolsInColorMatching = boolValue(root, "includeToolsInColorMatching", defaults.includeToolsInColorMatching);
         boolean confirmMode = boolValue(root, "confirmMode", defaults.confirmMode);
+        PaintingMode paintingMode = PaintingMode.fromString(stringValue(root, "paintingMode", defaults.paintingMode.name()));
         int autoPaintDefaultDelayTicks = Math.max(1, intValue(root, "autoPaintDefaultDelayTicks", defaults.autoPaintDefaultDelayTicks));
         int autoPaintMinDelayTicks = Math.max(1, intValue(root, "autoPaintMinDelayTicks", defaults.autoPaintMinDelayTicks));
         if (autoPaintMinDelayTicks == 20) {
@@ -109,6 +114,12 @@ public final class ConfigManager {
         double autoAimToleranceDegrees = Math.max(0.05D, doubleValue(root, "autoAimToleranceDegrees", defaults.autoAimToleranceDegrees));
         boolean autoRequireCalibration = boolValue(root, "autoRequireCalibration", defaults.autoRequireCalibration);
         boolean autoLockCameraDuringAuto = boolValue(root, "autoLockCameraDuringAuto", defaults.autoLockCameraDuringAuto);
+        boolean portableExactCalibrationMode = boolValue(root, "portableExactCalibrationMode", defaults.portableExactCalibrationMode);
+        boolean useBundledDirectionalCalibration = boolValue(root, "useBundledDirectionalCalibration", defaults.useBundledDirectionalCalibration);
+        String defaultBundledCalibrationPrefix = sanitizeCalibrationName(stringValue(root, "defaultBundledCalibrationPrefix", defaults.defaultBundledCalibrationPrefix));
+        boolean autoDetectCalibrationDirectionOnAutoStart = boolValue(root, "autoDetectCalibrationDirectionOnAutoStart", defaults.autoDetectCalibrationDirectionOnAutoStart);
+        double cardinalDirectionToleranceDegrees = clampDouble(doubleValue(root, "cardinalDirectionToleranceDegrees", defaults.cardinalDirectionToleranceDegrees), 0.1D, 45.0D);
+        boolean autoEnablePortableForBundledCalibration = boolValue(root, "autoEnablePortableForBundledCalibration", defaults.autoEnablePortableForBundledCalibration);
         boolean autoDragSameColorRuns = boolValue(root, "autoDragSameColorRuns", defaults.autoDragSameColorRuns);
         int autoDragMinRunLength = Math.max(2, intValue(root, "autoDragMinRunLength", defaults.autoDragMinRunLength));
         int autoDragPixelTicks = Math.max(1, intValue(root, "autoDragPixelTicks", defaults.autoDragPixelTicks));
@@ -118,6 +129,17 @@ public final class ConfigManager {
         boolean autoDragRequireExactCalibration = boolValue(root, "autoDragRequireExactCalibration", defaults.autoDragRequireExactCalibration);
         int autoDragStartHoldTicks = Math.max(0, intValue(root, "autoDragStartHoldTicks", defaults.autoDragStartHoldTicks));
         int autoDragEndHoldTicks = Math.max(0, intValue(root, "autoDragEndHoldTicks", defaults.autoDragEndHoldTicks));
+        boolean smartEnabled = boolValue(root, "smartEnabled", defaults.smartEnabled);
+        SmartPaintMode smartMode = SmartPaintMode.fromString(stringValue(root, "smartMode", defaults.smartMode.name()));
+        boolean smartBaseCoatEnabled = boolValue(root, "smartBaseCoatEnabled", defaults.smartBaseCoatEnabled);
+        int smartBucketThreshold = Math.max(2, intValue(root, "smartBucketThreshold", defaults.smartBucketThreshold));
+        int smartDragThreshold = Math.max(2, intValue(root, "smartDragThreshold", defaults.smartDragThreshold));
+        boolean bucketEnabled = boolValue(root, "bucketEnabled", defaults.bucketEnabled);
+        int bucketClickRepeats = clamp(intValue(root, "bucketClickRepeats", defaults.bucketClickRepeats), 1, 4);
+        int bucketClickGapTicks = Math.max(0, intValue(root, "bucketClickGapTicks", defaults.bucketClickGapTicks));
+        int bucketSwapDelayTicks = Math.max(0, intValue(root, "bucketSwapDelayTicks", defaults.bucketSwapDelayTicks));
+        int bucketAimSettleTicks = Math.max(0, intValue(root, "bucketAimSettleTicks", defaults.bucketAimSettleTicks));
+        int bucketAfterDelayTicks = Math.max(0, intValue(root, "bucketAfterDelayTicks", defaults.bucketAfterDelayTicks));
         String selectedCalibrationName = sanitizeCalibrationName(stringValue(root, "selectedCalibrationName", defaults.selectedCalibrationName));
         boolean serverColorOverridesEnabled = boolValue(root, "serverColorOverridesEnabled", defaults.serverColorOverridesEnabled);
         boolean batchAutoStartAfterContinue = boolValue(root, "batchAutoStartAfterContinue", defaults.batchAutoStartAfterContinue);
@@ -178,11 +200,17 @@ public final class ConfigManager {
         return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
                 advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
                 alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors,
-                colorMatchMode, includeToolsInColorMatching, confirmMode, autoPaintDefaultDelayTicks,
+                colorMatchMode, includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
                 autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
-                autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, autoDragSameColorRuns,
+                autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                 autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
-                autoDragStartHoldTicks, autoDragEndHoldTicks, selectedCalibrationName,
+                autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                bucketAfterDelayTicks, selectedCalibrationName,
                 serverColorOverridesEnabled, List.copyOf(serverColorOverrides),
                 batchAutoStartAfterContinue, batchDefaultSpeedTicks, batchEnableDrag,
                 postPaintAutomationEnabled, postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot,
@@ -250,6 +278,7 @@ public final class ConfigManager {
         root.addProperty("colorMatchMode", value.colorMatchMode.name());
         root.addProperty("includeToolsInColorMatching", value.includeToolsInColorMatching);
         root.addProperty("confirmMode", value.confirmMode);
+        root.addProperty("paintingMode", value.paintingMode.name());
         root.addProperty("autoPaintDefaultDelayTicks", value.autoPaintDefaultDelayTicks);
         root.addProperty("autoPaintMinDelayTicks", value.autoPaintMinDelayTicks);
         root.addProperty("autoPaintClickButton", value.autoPaintClickButton.name());
@@ -257,12 +286,29 @@ public final class ConfigManager {
         root.addProperty("autoAimToleranceDegrees", value.autoAimToleranceDegrees);
         root.addProperty("autoRequireCalibration", value.autoRequireCalibration);
         root.addProperty("autoLockCameraDuringAuto", value.autoLockCameraDuringAuto);
+        root.addProperty("portableExactCalibrationMode", value.portableExactCalibrationMode);
+        root.addProperty("useBundledDirectionalCalibration", value.useBundledDirectionalCalibration);
+        root.addProperty("defaultBundledCalibrationPrefix", value.defaultBundledCalibrationPrefix);
+        root.addProperty("autoDetectCalibrationDirectionOnAutoStart", value.autoDetectCalibrationDirectionOnAutoStart);
+        root.addProperty("cardinalDirectionToleranceDegrees", value.cardinalDirectionToleranceDegrees);
+        root.addProperty("autoEnablePortableForBundledCalibration", value.autoEnablePortableForBundledCalibration);
         root.addProperty("autoDragSameColorRuns", value.autoDragSameColorRuns);
         root.addProperty("autoDragMinRunLength", value.autoDragMinRunLength);
         root.addProperty("autoDragPixelTicks", value.autoDragPixelTicks);
         root.addProperty("autoDragRequireExactCalibration", value.autoDragRequireExactCalibration);
         root.addProperty("autoDragStartHoldTicks", value.autoDragStartHoldTicks);
         root.addProperty("autoDragEndHoldTicks", value.autoDragEndHoldTicks);
+        root.addProperty("smartEnabled", value.smartEnabled);
+        root.addProperty("smartMode", value.smartMode.name());
+        root.addProperty("smartBaseCoatEnabled", value.smartBaseCoatEnabled);
+        root.addProperty("smartBucketThreshold", value.smartBucketThreshold);
+        root.addProperty("smartDragThreshold", value.smartDragThreshold);
+        root.addProperty("bucketEnabled", value.bucketEnabled);
+        root.addProperty("bucketClickRepeats", value.bucketClickRepeats);
+        root.addProperty("bucketClickGapTicks", value.bucketClickGapTicks);
+        root.addProperty("bucketSwapDelayTicks", value.bucketSwapDelayTicks);
+        root.addProperty("bucketAimSettleTicks", value.bucketAimSettleTicks);
+        root.addProperty("bucketAfterDelayTicks", value.bucketAfterDelayTicks);
         root.addProperty("selectedCalibrationName", value.selectedCalibrationName);
         root.addProperty("serverColorOverridesEnabled", value.serverColorOverridesEnabled);
         root.addProperty("batchAutoStartAfterContinue", value.batchAutoStartAfterContinue);
@@ -331,6 +377,75 @@ public final class ConfigManager {
         saveConfigChange("post-paint automation", warningSink);
     }
 
+    public void setPortableExactCalibrationMode(boolean enabled, Consumer<Text> warningSink) {
+        config = config.withPortableExactCalibrationMode(enabled);
+        saveConfigChange("portable exact calibration mode", warningSink);
+    }
+
+    public void setPaintingMode(PaintingMode mode, Consumer<Text> warningSink) {
+        config = config.withPaintingModePreset(mode == null ? PaintingMode.SMART : mode);
+        saveConfigChange("painting mode", warningSink);
+    }
+
+    public void setAutoDragSameColorRuns(boolean enabled, Consumer<Text> warningSink) {
+        config = config.withAutoDragSameColorRuns(enabled);
+        saveConfigChange("auto drag", warningSink);
+    }
+
+    public void setSmartEnabled(boolean enabled, Consumer<Text> warningSink) {
+        config = config.withSmartSettings(enabled, config.smartMode(), config.smartBaseCoatEnabled(),
+                config.smartBucketThreshold(), config.smartDragThreshold());
+        saveConfigChange("smart mode", warningSink);
+    }
+
+    public void setSmartBaseCoatEnabled(boolean enabled, Consumer<Text> warningSink) {
+        config = config.withSmartSettings(config.smartEnabled(), config.smartMode(), enabled,
+                config.smartBucketThreshold(), config.smartDragThreshold());
+        saveConfigChange("smart basecoat", warningSink);
+    }
+
+    public void setSmartBucketThreshold(int value, Consumer<Text> warningSink) {
+        config = config.withSmartSettings(config.smartEnabled(), config.smartMode(), config.smartBaseCoatEnabled(),
+                Math.max(2, value), config.smartDragThreshold());
+        saveConfigChange("smart bucket threshold", warningSink);
+    }
+
+    public void setSmartDragThreshold(int value, Consumer<Text> warningSink) {
+        config = config.withSmartSettings(config.smartEnabled(), config.smartMode(), config.smartBaseCoatEnabled(),
+                config.smartBucketThreshold(), Math.max(2, value));
+        saveConfigChange("smart drag threshold", warningSink);
+    }
+
+    public void setBucketEnabled(boolean enabled, Consumer<Text> warningSink) {
+        config = config.withBucketSettings(enabled, config.bucketClickRepeats(), config.bucketClickGapTicks(),
+                config.bucketSwapDelayTicks(), config.bucketAimSettleTicks(), config.bucketAfterDelayTicks());
+        saveConfigChange("bucket mode", warningSink);
+    }
+
+    public void setBucketClickRepeats(int value, Consumer<Text> warningSink) {
+        config = config.withBucketSettings(config.bucketEnabled(), clamp(value, 1, 4), config.bucketClickGapTicks(),
+                config.bucketSwapDelayTicks(), config.bucketAimSettleTicks(), config.bucketAfterDelayTicks());
+        saveConfigChange("bucket click repeats", warningSink);
+    }
+
+    public void setBucketClickGapTicks(int value, Consumer<Text> warningSink) {
+        config = config.withBucketSettings(config.bucketEnabled(), config.bucketClickRepeats(), Math.max(0, value),
+                config.bucketSwapDelayTicks(), config.bucketAimSettleTicks(), config.bucketAfterDelayTicks());
+        saveConfigChange("bucket click gap", warningSink);
+    }
+
+    public void setBucketSwapDelayTicks(int value, Consumer<Text> warningSink) {
+        config = config.withBucketSettings(config.bucketEnabled(), config.bucketClickRepeats(), config.bucketClickGapTicks(),
+                Math.max(0, value), config.bucketAimSettleTicks(), config.bucketAfterDelayTicks());
+        saveConfigChange("bucket swap delay", warningSink);
+    }
+
+    public void setBucketAfterDelayTicks(int value, Consumer<Text> warningSink) {
+        config = config.withBucketSettings(config.bucketEnabled(), config.bucketClickRepeats(), config.bucketClickGapTicks(),
+                config.bucketSwapDelayTicks(), config.bucketAimSettleTicks(), Math.max(0, value));
+        saveConfigChange("bucket after delay", warningSink);
+    }
+
     public void setPostPaintRenameClickPoint(RecordedClickPoint point, Consumer<Text> warningSink) {
         config = config.withPostPaintRenameClickPoint(point);
         saveConfigChange("rename click point", warningSink);
@@ -392,7 +507,8 @@ public final class ConfigManager {
                     doubleValue(object, "y", 0.0D),
                     doubleValue(object, "normalizedX", 0.0D),
                     doubleValue(object, "normalizedY", 0.0D),
-                    intValue(object, "button", 0)
+                    intValue(object, "button", 0),
+                    stringValue(object, "source", "cursor")
             );
         } catch (RuntimeException e) {
             return null;
@@ -409,10 +525,15 @@ public final class ConfigManager {
         object.addProperty("normalizedX", point.normalizedX());
         object.addProperty("normalizedY", point.normalizedY());
         object.addProperty("button", point.button());
+        object.addProperty("source", point.source());
         root.add(key, object);
     }
 
     private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static double clampDouble(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
 
@@ -501,6 +622,7 @@ public final class ConfigManager {
             ColorMatchMode colorMatchMode,
             boolean includeToolsInColorMatching,
             boolean confirmMode,
+            PaintingMode paintingMode,
             int autoPaintDefaultDelayTicks,
             int autoPaintMinDelayTicks,
             AutoClickButton autoPaintClickButton,
@@ -508,12 +630,29 @@ public final class ConfigManager {
             double autoAimToleranceDegrees,
             boolean autoRequireCalibration,
             boolean autoLockCameraDuringAuto,
+            boolean portableExactCalibrationMode,
+            boolean useBundledDirectionalCalibration,
+            String defaultBundledCalibrationPrefix,
+            boolean autoDetectCalibrationDirectionOnAutoStart,
+            double cardinalDirectionToleranceDegrees,
+            boolean autoEnablePortableForBundledCalibration,
             boolean autoDragSameColorRuns,
             int autoDragMinRunLength,
             int autoDragPixelTicks,
             boolean autoDragRequireExactCalibration,
             int autoDragStartHoldTicks,
             int autoDragEndHoldTicks,
+            boolean smartEnabled,
+            SmartPaintMode smartMode,
+            boolean smartBaseCoatEnabled,
+            int smartBucketThreshold,
+            int smartDragThreshold,
+            boolean bucketEnabled,
+            int bucketClickRepeats,
+            int bucketClickGapTicks,
+            int bucketSwapDelayTicks,
+            int bucketAimSettleTicks,
+            int bucketAfterDelayTicks,
             String selectedCalibrationName,
             boolean serverColorOverridesEnabled,
             List<ServerColorOverride> serverColorOverrides,
@@ -547,11 +686,17 @@ public final class ConfigManager {
             return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
                     advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
                     alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
-                    includeToolsInColorMatching, confirmMode, autoPaintDefaultDelayTicks,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
                     autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
-                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, autoDragSameColorRuns,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
-                    autoDragStartHoldTicks, autoDragEndHoldTicks, ConfigManager.sanitizeCalibrationName(value),
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, ConfigManager.sanitizeCalibrationName(value),
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
                     batchDefaultSpeedTicks, batchEnableDrag, postPaintAutomationEnabled,
                     postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
@@ -566,6 +711,87 @@ public final class ConfigManager {
             return copy(value, postPaintRenameClickPoint, postPaintPv2ClickPoint);
         }
 
+        public Config withPortableExactCalibrationMode(boolean value) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, value,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, selectedCalibrationName,
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, batchEnableDrag, postPaintAutomationEnabled,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, postPaintVaultCommand, postPaintSaveSelectDelayTicks,
+                    postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
+                    postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
+                    postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+        }
+
+        public Config withPaintingModePreset(PaintingMode mode) {
+            PaintingMode nextMode = mode == null ? PaintingMode.SMART : mode;
+            boolean nextSmart = nextMode == PaintingMode.SMART;
+            boolean nextBucket = nextMode == PaintingMode.SMART;
+            boolean nextDrag = nextMode != PaintingMode.MANUAL;
+            boolean nextPostPaint = nextMode == PaintingMode.MANUAL ? postPaintAutomationEnabled : true;
+            int nextSpeed = 5;
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, true,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, nextMode, nextSpeed,
+                    nextSpeed, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, nextDrag,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, nextSmart, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, nextBucket,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, "ee",
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    nextSpeed, nextDrag, nextPostPaint,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, postPaintVaultCommand, postPaintSaveSelectDelayTicks,
+                    postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
+                    postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
+                    postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+        }
+
+        public Config withAutoDragSameColorRuns(boolean value) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, value,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, selectedCalibrationName,
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, value, postPaintAutomationEnabled,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, postPaintVaultCommand, postPaintSaveSelectDelayTicks,
+                    postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
+                    postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
+                    postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+        }
+
         public Config withPostPaintRenameClickPoint(RecordedClickPoint value) {
             return copy(postPaintAutomationEnabled, value, postPaintPv2ClickPoint);
         }
@@ -574,15 +800,73 @@ public final class ConfigManager {
             return copy(postPaintAutomationEnabled, postPaintRenameClickPoint, value);
         }
 
+        public Config withSmartSettings(boolean enabled, SmartPaintMode mode, boolean baseCoatEnabled,
+                                        int bucketThreshold, int dragThreshold) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, enabled, mode,
+                    baseCoatEnabled, Math.max(2, bucketThreshold), Math.max(2, dragThreshold), bucketEnabled,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, selectedCalibrationName,
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, batchEnableDrag, postPaintAutomationEnabled,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, postPaintVaultCommand, postPaintSaveSelectDelayTicks,
+                    postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
+                    postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
+                    postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+        }
+
+        public Config withBucketSettings(boolean enabled, int repeats, int gapTicks, int swapDelayTicks,
+                                         int aimSettleTicks, int afterDelayTicks) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, enabled,
+                    ConfigManager.clamp(repeats, 1, 4), Math.max(0, gapTicks), Math.max(0, swapDelayTicks),
+                    Math.max(0, aimSettleTicks), Math.max(0, afterDelayTicks), selectedCalibrationName,
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, batchEnableDrag, postPaintAutomationEnabled,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, postPaintVaultCommand, postPaintSaveSelectDelayTicks,
+                    postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
+                    postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
+                    postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+        }
+
         private Config copy(boolean enabled, RecordedClickPoint renamePoint, RecordedClickPoint pv2Point) {
             return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
                     advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
                     alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
-                    includeToolsInColorMatching, confirmMode, autoPaintDefaultDelayTicks,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
                     autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
-                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, autoDragSameColorRuns,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
-                    autoDragStartHoldTicks, autoDragEndHoldTicks, selectedCalibrationName,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, selectedCalibrationName,
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
                     batchDefaultSpeedTicks, batchEnableDrag, enabled, postPaintSaveHotbarSlot,
                     postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot, postPaintAimCalibrationIndex,
@@ -615,10 +899,12 @@ public final class ConfigManager {
             }
             OverrideResult overrideResult = applyServerColorOverrides(colors, true, overrides);
             return new Config(32, 32, 8, true, true, true, false, 10,
-                    TransparentPixelMode.SKIP, false, true, ColorMatchMode.RGB, false, false,
-                    20, 5, AutoClickButton.RIGHT, 2, 0.75D, true, true,
-                    true, 2, 2, true, 2, 1, "1", true, List.copyOf(overrides),
-                    true, 5, true, false, 2, 0, 1, 500, "/pv 2", 2, 3, 20, 2, true, 5, 2, 4, null, null,
+                    TransparentPixelMode.SKIP, false, true, ColorMatchMode.RGB, false, false, PaintingMode.SMART,
+                    5, 5, AutoClickButton.RIGHT, 2, 0.75D, true, true, false,
+                    true, "ee", true, 45.0D, true,
+                    true, 2, 2, true, 2, 1, true, SmartPaintMode.AGGRESSIVE,
+                    true, 10, 5, true, 1, 2, 6, 2, 10, "ee", true, List.copyOf(overrides),
+                    true, 5, true, true, 2, 0, 1, 500, "/pv 2", 2, 3, 20, 2, true, 5, 2, 4, null, null,
                     List.copyOf(colors), overrideResult.colors());
         }
     }

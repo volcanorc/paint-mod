@@ -21,6 +21,7 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
     private CalibrationManager calibrationManager;
     private CalibrationMarkerRenderer calibrationMarkerRenderer;
     private AutoPainter autoPainter;
+    private SmartPainter smartPainter;
     private BatchManager batchManager;
     private PostPaintWorkflow postPaintWorkflow;
     private GuiClickRecorder guiClickRecorder;
@@ -43,10 +44,11 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         calibrationMarkerRenderer = new CalibrationMarkerRenderer(client, calibrationManager);
         calibrationMarkerRenderer.register();
         autoPainter = new AutoPainter(client, controller, calibrationManager, configManager.config());
+        smartPainter = new SmartPainter(client, controller, calibrationManager);
         postPaintWorkflow = new PostPaintWorkflow(client, calibrationManager);
-        batchManager = new BatchManager(configManager, controller, autoPainter, postPaintWorkflow);
+        batchManager = new BatchManager(configManager, controller, autoPainter, smartPainter, calibrationManager, postPaintWorkflow);
         guiClickRecorder = new GuiClickRecorder(client, configManager);
-        commandHandler = new HashCommandHandler(configManager, controller, autoPainter, calibrationManager, batchManager, guiClickRecorder);
+        commandHandler = new HashCommandHandler(configManager, controller, autoPainter, smartPainter, calibrationManager, batchManager, guiClickRecorder);
         clickTracker = new ClickTracker(client);
         keybindHandler = new KeybindHandler();
         keybindHandler.register();
@@ -82,6 +84,13 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         }
     }
 
+    public static boolean recordGuiScreenClick(double mouseX, double mouseY, int button) {
+        if (instance == null || instance.guiClickRecorder == null || !instance.guiClickRecorder.armed()) {
+            return false;
+        }
+        return instance.guiClickRecorder.recordScreenClick(mouseX, mouseY, button, instance.sink());
+    }
+
     private void tick(MinecraftClient client) {
         SessionController.MessageSink sink = sink();
         if (openGuiPending && !(client.currentScreen instanceof ChatScreen)) {
@@ -89,10 +98,13 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
             client.setScreen(new PaintingControlScreen(commandHandler, autoPainter, calibrationManager, configManager, batchManager));
         }
         controller.tick(sink);
-        autoPainter.tick(configManager.config(), sink);
+        smartPainter.tick(configManager.config(), sink);
+        if (!smartPainter.running()) {
+            autoPainter.tick(configManager.config(), sink);
+        }
         batchManager.tick(sink);
         keybindHandler.tick(controller, autoPainter, calibrationManager, calibrationMarkerRenderer, sink);
-        clickTracker.tick(configManager.config(), commandHandler.confirmMode(), controller, calibrationManager, guiClickRecorder, sink);
+        clickTracker.tick(configManager.config(), commandHandler.confirmMode(), controller, calibrationManager, guiClickRecorder, smartPainter, sink);
     }
 
     void requestOpenGui() {

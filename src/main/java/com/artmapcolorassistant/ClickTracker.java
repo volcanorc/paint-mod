@@ -16,6 +16,7 @@ public final class ClickTracker {
 
     public void tick(ConfigManager.Config config, boolean confirmMode, SessionController controller,
                      CalibrationManager calibrationManager, GuiClickRecorder guiClickRecorder,
+                     SmartPainter smartPainter,
                      SessionController.MessageSink sink) {
         long handle = client.getWindow().getHandle();
         boolean left = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
@@ -37,6 +38,9 @@ public final class ClickTracker {
                 calibrationManager.recordClick(sink);
             }
             return;
+        }
+        if ((leftPressed || rightPressed) && smartPainter != null) {
+            smartPainter.invalidateTrust("manual click");
         }
         if (confirmMode) {
             return;
