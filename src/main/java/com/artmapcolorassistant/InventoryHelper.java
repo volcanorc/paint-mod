@@ -4,9 +4,12 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.Identifier;
 
 import java.util.HashMap;
@@ -149,6 +152,55 @@ public final class InventoryHelper {
         return Identifier.of("minecraft", "bucket").equals(Registries.ITEM.getId(stack.getItem()));
     }
 
+    public boolean exactEmptyBucketInMainHand() {
+        ClientPlayerEntity player = client.player;
+        return player != null && exactBucket(player.getMainHandStack());
+    }
+
+    public boolean mainHandMatches(ArtMapColor color) {
+        ClientPlayerEntity player = client.player;
+        return player != null && matches(player.getMainHandStack(), color);
+    }
+
+    public boolean offHandMatches(ArtMapColor color) {
+        ClientPlayerEntity player = client.player;
+        return player != null && matches(player.getOffHandStack(), color);
+    }
+
+    public boolean bucketPairReady(ArtMapColor color) {
+        return mainHandMatches(color) && exactEmptyBucketInOffhand();
+    }
+
+    public boolean bucketPairSwapped(ArtMapColor color) {
+        return exactEmptyBucketInMainHand() && offHandMatches(color);
+    }
+
+    public boolean requestSwapHands() {
+        ClientPlayerEntity player = client.player;
+        if (player == null || player.networkHandler == null) {
+            return false;
+        }
+        player.networkHandler.sendPacket(new PlayerActionC2SPacket(
+                PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND,
+                BlockPos.ORIGIN,
+                Direction.DOWN
+        ));
+        return true;
+    }
+
+    public String bucketHandStatus(ArtMapColor color) {
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return "main=unavailable offhand=unavailable";
+        }
+        Identifier main = itemId(player.getMainHandStack());
+        Identifier off = itemId(player.getOffHandStack());
+        return "main=" + (main == null ? "empty" : main)
+                + " offhand=" + (off == null ? "empty" : off)
+                + " ready=" + bucketPairReady(color)
+                + " swapped=" + bucketPairSwapped(color);
+    }
+
     private boolean canSwapNow() {
         return client.currentScreen == null || client.currentScreen instanceof ChatScreen;
     }
@@ -166,6 +218,17 @@ public final class InventoryHelper {
         }
         Identifier id = Registries.ITEM.getId(stack.getItem());
         return color.matches(id);
+    }
+
+    private boolean exactBucket(ItemStack stack) {
+        return Identifier.of("minecraft", "bucket").equals(itemId(stack));
+    }
+
+    private Identifier itemId(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return null;
+        }
+        return Registries.ITEM.getId(stack.getItem());
     }
 
     public static String missingMessage(PaintStep step) {

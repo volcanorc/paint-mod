@@ -2,359 +2,260 @@ package com.artmapcolorassistant;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 public final class SmartPaintPlanner {
-    private static final int MAX_PREVIEW_ACTIONS = 4096;
+    private static final int MAX_DRAG_TRAIL_VISITS = 64;
+
+    public PreparedSmartPlan prepare(PaintSession session, ConfigManager.Config config) {
+        if (session == null) {
+            return unavailable(null, "no active painting session");
+        }
+        SmartCanvas canvas = SmartCanvas.fresh(session, config);
+        int originalWrong = canvas.wrongCount();
+        int oldTicks = canvas.paintableCount() * ActionCostModel.manual(config);
+        ArtMapColor dominant = dominantNonBlankTargetColor(canvas);
+        List<Integer> anchors = scriptedAnchors(canvas);
+        String unavailable = baseCoatUnavailableReason(canvas, config, dominant);
+        if (unavailable == null && anchors.size() != 9) {
+            unavailable = "canvas is too small for nine unique bucket anchors";
+        }
+        if (unavailable != null) {
+            SmartPreview preview = preview(oldTicks, originalWrong, List.of(), dominant, null, unavailable,
+                    ComponentAnalyzer.wrongPixelComponents(canvas).size(), 0);
+            return new PreparedSmartPlan(null, List.of(), anchors, preview, unavailable);
+        }
+
+        PaintAction baseCoat = baseCoatAction(canvas, dominant, config);
+        canvas.apply(baseCoat);
+        List<PaintAction> actions = connectedActions(canvas, config);
+        int componentCount = ComponentAnalyzer.wrongPixelComponents(canvas).size();
+        int smartTicks = baseCoat.estimatedTicks() + actions.stream().mapToInt(PaintAction::estimatedTicks).sum();
+        SmartPreview preview = preview(oldTicks, originalWrong, actions, dominant, dominant,
+                "mandatory dominant-color startup base coat", componentCount, smartTicks);
+        return new PreparedSmartPlan(baseCoat, actions, anchors, preview, null);
+    }
+
+    public SmartPreview preview(PaintSession session, ConfigManager.Config config) {
+        return prepare(session, config).preview();
+    }
+
+    public boolean shouldUseSmart(PaintSession session, ConfigManager.Config config) {
+        return config.smartEnabled() && prepare(session, config).available();
+    }
 
     public Optional<PaintAction> nextAction(SmartCanvas canvas, ConfigManager.Config config) {
         if (canvas == null || canvas.wrongCount() == 0) {
             return Optional.empty();
         }
-        if (config.bucketEnabled() && config.smartBaseCoatEnabled() && !canvas.baseCoatDecisionDone() && canvas.trusted()) {
-            PaintAction base = plannedBaseCoatAction(canvas, config);
-            if (base != null) {
-                return Optional.of(base);
+        if (!canvas.baseCoatDecisionDone()) {
+            ArtMapColor dominant = dominantNonBlankTargetColor(canvas);
+            String unavailable = baseCoatUnavailableReason(canvas, config, dominant);
+            if (unavailable == null) {
+                return Optional.of(baseCoatAction(canvas, dominant, config));
             }
-            canvas.markBaseCoatDecisionDone();
+            return Optional.empty();
         }
-        if (config.bucketEnabled()) {
-            PaintAction bucket = largestSafeBucket(canvas, config);
-            if (bucket != null) {
-                return Optional.of(bucket);
-            }
-        }
-        PaintAction drag = longestDragRun(canvas, config);
-        if (drag != null) {
-            return Optional.of(drag);
-        }
-        return manualFallback(canvas, config);
-    }
-
-    public SmartPreview preview(PaintSession session, ConfigManager.Config config) {
-        SmartCanvas canvas = SmartCanvas.fresh(session, config);
-        int originalWrong = canvas.wrongCount();
-        int believedManualTicks = originalWrong * ActionCostModel.manual(config);
-        int oldTicks = canvas.paintableCount() * ActionCostModel.manual(config);
-        ArtMapColor dominant = dominantTargetColor(canvas);
-        SmartPlanEstimate estimate = bestInitialRoute(canvas, config);
-        String risk = riskLevel(oldTicks, estimate.totalTicks(), estimate.bucketActions(), estimate.unsafeBucketCandidates(), config);
-        return new SmartPreview(oldTicks, believedManualTicks, estimate.totalTicks(), oldTicks - estimate.totalTicks(),
-                estimate.manualActions(), estimate.dragActions(), estimate.bucketActions(), estimate.unsafeBucketCandidates(),
-                originalWrong, ComponentAnalyzer.wrongPixelComponents(SmartCanvas.fresh(session, config)).size(),
-                dominant, estimate.selectedBaseCoatColor(), estimate.baseCoatAction() != null, risk);
-    }
-
-    public boolean shouldUseSmart(PaintSession session, ConfigManager.Config config) {
-        if (!config.smartEnabled()) {
-            return false;
-        }
-        SmartPreview preview = preview(session, config);
-        return preview.expectedSavingsTicks() > ActionCostModel.manual(config) * 4
-                && !"high".equals(preview.riskLevel());
+        List<PaintAction> actions = connectedActions(canvas, config);
+        return actions.isEmpty() ? Optional.empty() : Optional.of(actions.getFirst());
     }
 
     public ArtMapColor dominantTargetColor(SmartCanvas canvas) {
-        Map<ArtMapColor, Integer> counts = new HashMap<>();
+        return dominantNonBlankTargetColor(canvas);
+    }
+
+    private PreparedSmartPlan unavailable(SmartPreview preview, String reason) {
+        return new PreparedSmartPlan(null, List.of(), List.of(), preview, reason);
+    }
+
+    private String baseCoatUnavailableReason(SmartCanvas canvas, ConfigManager.Config config, ArtMapColor dominant) {
+        if (!config.bucketEnabled()) {
+            return "initial bucket base coat is disabled";
+        }
+        if (!config.smartBaseCoatEnabled()) {
+            return "dominant-color base coat is disabled";
+        }
+        if (!canvas.trusted()) {
+            return "canvas state is not trusted";
+        }
+        for (int i = 0; i < canvas.size(); i++) {
+            if (canvas.skipped(i)) {
+                return "transparent SKIP pixels cannot be preserved by a whole-canvas base coat";
+            }
+        }
+        if (dominant == null) {
+            return "no nonblank dominant color is available";
+        }
+        return null;
+    }
+
+    private ArtMapColor dominantNonBlankTargetColor(SmartCanvas canvas) {
+        LinkedHashMap<ArtMapColor, Integer> counts = new LinkedHashMap<>();
         for (int i = 0; i < canvas.size(); i++) {
             if (canvas.skipped(i)) {
                 continue;
             }
             ArtMapColor color = canvas.targetColor(i);
-            if (color != null) {
+            if (color != null && !SmartCanvas.sameColor(color, canvas.blankColor())) {
                 counts.put(color, counts.getOrDefault(color, 0) + 1);
             }
         }
-        return counts.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElse(null);
-    }
-
-    private PaintAction plannedBaseCoatAction(SmartCanvas canvas, ConfigManager.Config config) {
-        if (canvas.plannedBaseCoat() != null) {
-            return canvas.plannedBaseCoat();
-        }
-        SmartPlanEstimate estimate = bestInitialRoute(canvas, config);
-        if (estimate.baseCoatAction() == null) {
-            return null;
-        }
-        canvas.setPlannedBaseCoat(estimate.baseCoatAction());
-        return estimate.baseCoatAction();
-    }
-
-    private SmartPlanEstimate bestInitialRoute(SmartCanvas canvas, ConfigManager.Config config) {
-        SmartPlanEstimate noBaseCoat = simulateRoute(canvas.copy(), config, null, 0);
-        SmartPlanEstimate best = noBaseCoat;
-        if (!canConsiderBaseCoat(canvas, config)) {
-            return noBaseCoat;
-        }
-        List<ArtMapColor> candidates = orderedTargetColors(canvas);
-        int order = 1;
-        for (ArtMapColor candidate : candidates) {
-            if (SmartCanvas.sameColor(candidate, canvas.blankColor())) {
-                order++;
-                continue;
-            }
-            PaintAction base = baseCoatAction(canvas, candidate, config);
-            if (base == null) {
-                order++;
-                continue;
-            }
-            SmartCanvas simulated = canvas.copy();
-            SmartPlanEstimate estimate = simulateRoute(simulated, config, base, order);
-            if (estimate.betterThan(best)) {
-                best = estimate;
-            }
-            order++;
-        }
-        return best.totalTicks() + ActionCostModel.manual(config) <= noBaseCoat.totalTicks() ? best : noBaseCoat;
-    }
-
-    private boolean canConsiderBaseCoat(SmartCanvas canvas, ConfigManager.Config config) {
-        if (!config.bucketEnabled() || !config.smartBaseCoatEnabled() || !canvas.trusted() || canvas.baseCoatDecisionDone()) {
-            return false;
-        }
-        for (int i = 0; i < canvas.size(); i++) {
-            if (canvas.skipped(i)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private List<ArtMapColor> orderedTargetColors(SmartCanvas canvas) {
-        LinkedHashMap<ArtMapColor, Boolean> colors = new LinkedHashMap<>();
-        for (int i = 0; i < canvas.size(); i++) {
-            if (!canvas.skipped(i) && canvas.targetColor(i) != null) {
-                colors.putIfAbsent(canvas.targetColor(i), Boolean.TRUE);
-            }
-        }
-        return List.copyOf(colors.keySet());
-    }
-
-    private PaintAction baseCoatAction(SmartCanvas canvas, ArtMapColor color, ConfigManager.Config config) {
-        ArrayList<Integer> indexes = new ArrayList<>();
-        for (int i = 0; i < canvas.size(); i++) {
-            if (!canvas.skipped(i)) {
-                indexes.add(i);
-            }
-        }
-        if (indexes.size() < config.smartBucketThreshold()) {
-            return null;
-        }
-        int seed = indexes.stream()
-                .filter(index -> SmartCanvas.sameColor(canvas.targetColor(index), color))
-                .findFirst()
-                .orElse(indexes.getFirst());
-        return new PaintAction(PaintActionType.BUCKET_BASE_COAT, color, color.item(), List.copyOf(indexes),
-                seed, seed, seed, ActionCostModel.bucket(config), "evaluated base coat");
-    }
-
-    private SmartPlanEstimate simulateRoute(SmartCanvas canvas, ConfigManager.Config config, PaintAction baseCoat, int baseCoatOrder) {
-        int manual = 0;
-        int drag = 0;
-        int bucket = 0;
-        int bucketPixels = 0;
-        int unsafe = 0;
-        int ticks = 0;
-        if (baseCoat != null) {
-            ticks += baseCoat.estimatedTicks();
-            bucket++;
-            bucketPixels += baseCoat.affectedCount();
-            canvas.apply(baseCoat);
-        }
-        for (int i = 0; i < MAX_PREVIEW_ACTIONS && canvas.wrongCount() > 0; i++) {
-            unsafe += countUnsafeBucketCandidates(canvas, config);
-            Optional<PaintAction> action = nextNonBaseCoatAction(canvas, config);
-            if (action.isEmpty()) {
-                break;
-            }
-            PaintAction current = action.get();
-            ticks += current.estimatedTicks();
-            if (current.type() == PaintActionType.MANUAL_CLICK) {
-                manual++;
-            } else if (current.type() == PaintActionType.DRAG_RUN) {
-                drag++;
-            } else {
-                bucket++;
-                bucketPixels += current.affectedCount();
-            }
-            canvas.apply(current);
-        }
-        if (canvas.wrongCount() > 0) {
-            ticks += canvas.wrongCount() * ActionCostModel.manual(config);
-            manual += canvas.wrongCount();
-        }
-        return new SmartPlanEstimate(baseCoat, baseCoat == null ? null : baseCoat.color(), ticks, manual, drag,
-                bucket, bucketPixels, unsafe, canvas.wrongCount(), baseCoatOrder);
-    }
-
-    private Optional<PaintAction> nextNonBaseCoatAction(SmartCanvas canvas, ConfigManager.Config config) {
-        if (canvas == null || canvas.wrongCount() == 0) {
-            return Optional.empty();
-        }
-        if (config.bucketEnabled()) {
-            PaintAction bucket = largestSafeBucket(canvas, config);
-            if (bucket != null) {
-                return Optional.of(bucket);
-            }
-        }
-        PaintAction drag = longestDragRun(canvas, config);
-        if (drag != null) {
-            return Optional.of(drag);
-        }
-        return manualFallback(canvas, config);
-    }
-
-    private PaintAction largestSafeBucket(SmartCanvas canvas, ConfigManager.Config config) {
-        if (!canvas.trusted()) {
-            return null;
-        }
-        Set<Integer> checked = new HashSet<>();
-        PaintAction best = null;
-        for (int i = 0; i < canvas.size(); i++) {
-            if (checked.contains(i) || !canvas.wrong(i)) {
-                continue;
-            }
-            List<Integer> region = FloodFill4.fill(canvas, i);
-            checked.addAll(region);
-            if (region.size() < config.smartBucketThreshold()) {
-                continue;
-            }
-            ArtMapColor target = canvas.targetColor(i);
-            if (target == null || SmartCanvas.sameColor(target, canvas.currentColor(i))) {
-                continue;
-            }
-            if (!safeBucketRegion(canvas, region, target)) {
-                continue;
-            }
-            PaintAction candidate = new PaintAction(PaintActionType.BUCKET_FILL, target, target.item(), List.copyOf(region),
-                    i, i, i, ActionCostModel.bucket(config), "safe 4-way flood region");
-            if (best == null || candidate.affectedCount() > best.affectedCount()) {
-                best = candidate;
+        ArtMapColor best = null;
+        int bestCount = -1;
+        for (Map.Entry<ArtMapColor, Integer> entry : counts.entrySet()) {
+            if (entry.getValue() > bestCount) {
+                best = entry.getKey();
+                bestCount = entry.getValue();
             }
         }
         return best;
     }
 
-    private boolean safeBucketRegion(SmartCanvas canvas, List<Integer> region, ArtMapColor target) {
-        if (region.isEmpty()) {
-            return false;
-        }
-        for (int index : region) {
-            if (canvas.skipped(index) || !SmartCanvas.sameColor(canvas.targetColor(index), target)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private PaintAction longestDragRun(SmartCanvas canvas, ConfigManager.Config config) {
-        int threshold = Math.max(2, config.smartDragThreshold());
-        List<Integer> best = List.of();
-        boolean[] consumed = new boolean[canvas.size()];
+    private PaintAction baseCoatAction(SmartCanvas canvas, ArtMapColor color, ConfigManager.Config config) {
+        ArrayList<Integer> indexes = new ArrayList<>(canvas.size());
+        int representative = -1;
         for (int i = 0; i < canvas.size(); i++) {
-            if (consumed[i] || !canvas.wrong(i)) {
-                continue;
-            }
-            List<Integer> run = ComponentAnalyzer.horizontalRun(canvas, i, threshold);
-            for (int index : run) {
-                consumed[index] = true;
-            }
-            if (run.size() > best.size()) {
-                best = run;
+            if (!canvas.skipped(i)) {
+                indexes.add(i);
+                if (representative < 0 && SmartCanvas.sameColor(canvas.targetColor(i), color)) {
+                    representative = i;
+                }
             }
         }
-        if (best.isEmpty()) {
-            return null;
-        }
-        int seed = best.getFirst();
-        ArtMapColor color = canvas.targetColor(seed);
-        return new PaintAction(PaintActionType.DRAG_RUN, color, color.item(), List.copyOf(best),
-                seed, best.getFirst(), best.getLast(), ActionCostModel.drag(config, best.size()), "same-color horizontal run");
+        return new PaintAction(PaintActionType.BUCKET_BASE_COAT, color, color.item(), List.copyOf(indexes),
+                representative, representative, representative, ActionCostModel.bucket(config),
+                "mandatory dominant-color startup base coat");
     }
 
-    private Optional<PaintAction> manualFallback(SmartCanvas canvas, ConfigManager.Config config) {
-        for (int i = 0; i < canvas.size(); i++) {
-            if (!canvas.wrong(i)) {
+    private List<PaintAction> connectedActions(SmartCanvas canvas, ConfigManager.Config config) {
+        ArrayList<PaintAction> actions = new ArrayList<>();
+        for (List<Integer> component : ComponentAnalyzer.wrongPixelComponents(canvas)) {
+            if (component.size() == 1) {
+                int index = component.getFirst();
+                ArtMapColor color = canvas.targetColor(index);
+                actions.add(new PaintAction(PaintActionType.MANUAL_CLICK, color, color.item(), List.of(index),
+                        index, index, index, ActionCostModel.manual(config), "isolated single pixel"));
                 continue;
             }
-            ArtMapColor color = canvas.targetColor(i);
-            if (color == null) {
+            List<Integer> trail = spanningTrail(canvas, component);
+            int offset = 0;
+            while (offset < trail.size()) {
+                int end = Math.min(trail.size(), offset + MAX_DRAG_TRAIL_VISITS);
+                List<Integer> segment = List.copyOf(trail.subList(offset, end));
+                int seed = segment.getFirst();
+                ArtMapColor color = canvas.targetColor(seed);
+                actions.add(new PaintAction(PaintActionType.DRAG_RUN, color, color.item(), segment,
+                        seed, seed, segment.getLast(), ActionCostModel.drag(config, segment.size()),
+                        "4-way connected same-color trail"));
+                if (end == trail.size()) {
+                    break;
+                }
+                offset = end - 1;
+            }
+        }
+        return List.copyOf(actions);
+    }
+
+    private List<Integer> spanningTrail(SmartCanvas canvas, List<Integer> component) {
+        Set<Integer> members = new HashSet<>(component);
+        int start = component.stream()
+                .filter(index -> neighbors(canvas, index, members).size() <= 1)
+                .min(Integer::compareTo)
+                .orElse(component.stream().min(Integer::compareTo).orElseThrow());
+        ArrayList<Integer> trail = new ArrayList<>();
+        HashSet<Integer> visited = new HashSet<>();
+        walkUntilCovered(canvas, start, members, visited, trail);
+        return List.copyOf(trail);
+    }
+
+    private boolean walkUntilCovered(SmartCanvas canvas, int index, Set<Integer> members,
+                                     Set<Integer> visited, List<Integer> trail) {
+        visited.add(index);
+        trail.add(index);
+        if (visited.size() == members.size()) {
+            return true;
+        }
+        for (int neighbor : neighbors(canvas, index, members)) {
+            if (visited.contains(neighbor)) {
                 continue;
             }
-            return Optional.of(new PaintAction(PaintActionType.MANUAL_CLICK, color, color.item(), List.of(i),
-                    i, i, i, ActionCostModel.manual(config), "single unsafe/detail pixel"));
+            if (walkUntilCovered(canvas, neighbor, members, visited, trail)) {
+                return true;
+            }
+            trail.add(index);
         }
-        return Optional.empty();
+        return visited.size() == members.size();
     }
 
-    private int countUnsafeBucketCandidates(SmartCanvas canvas, ConfigManager.Config config) {
-        if (!config.bucketEnabled() || !canvas.trusted()) {
-            return 0;
-        }
-        int rejected = 0;
-        Set<Integer> checked = new HashSet<>();
-        for (int i = 0; i < canvas.size(); i++) {
-            if (checked.contains(i) || !canvas.wrong(i)) {
-                continue;
-            }
-            List<Integer> region = FloodFill4.fill(canvas, i);
-            checked.addAll(region);
-            ArtMapColor target = canvas.targetColor(i);
-            if (region.size() >= config.smartBucketThreshold()
-                    && target != null
-                    && !SmartCanvas.sameColor(target, canvas.currentColor(i))
-                    && !safeBucketRegion(canvas, region, target)) {
-                rejected++;
-            }
-        }
-        return rejected;
+    private List<Integer> neighbors(SmartCanvas canvas, int index, Set<Integer> members) {
+        int x = CanvasMath.toX(index, canvas.width());
+        int y = CanvasMath.toY(index, canvas.width());
+        ArrayList<Integer> result = new ArrayList<>(4);
+        addNeighbor(result, members, x - 1, y, canvas.width(), canvas.height());
+        addNeighbor(result, members, x + 1, y, canvas.width(), canvas.height());
+        addNeighbor(result, members, x, y - 1, canvas.width(), canvas.height());
+        addNeighbor(result, members, x, y + 1, canvas.width(), canvas.height());
+        result.sort(Comparator.naturalOrder());
+        return result;
     }
 
-    private String riskLevel(int oldTicks, int smartTicks, int bucketActions, int unsafeBuckets, ConfigManager.Config config) {
-        if (!config.bucketEnabled() || bucketActions == 0) {
-            return smartTicks < oldTicks ? "low" : "none";
+    private void addNeighbor(List<Integer> result, Set<Integer> members, int x, int y, int width, int height) {
+        if (x < 0 || y < 0 || x >= width || y >= height) {
+            return;
         }
-        if (unsafeBuckets > 0 || config.bucketClickRepeats() > 1) {
-            return "medium";
+        int index = CanvasMath.toIndex(x, y, width);
+        if (members.contains(index)) {
+            result.add(index);
         }
-        if (smartTicks >= oldTicks) {
-            return "high";
-        }
-        return "low";
     }
 
-    private record SmartPlanEstimate(
-            PaintAction baseCoatAction,
-            ArtMapColor selectedBaseCoatColor,
-            int totalTicks,
-            int manualActions,
-            int dragActions,
-            int bucketActions,
-            int bucketPixels,
-            int unsafeBucketCandidates,
-            int remainingWrongPixels,
-            int baseCoatOrder
-    ) {
-        private boolean betterThan(SmartPlanEstimate other) {
-            if (totalTicks != other.totalTicks) {
-                return totalTicks < other.totalTicks;
-            }
-            if (manualActions != other.manualActions) {
-                return manualActions < other.manualActions;
-            }
-            if (bucketPixels != other.bucketPixels) {
-                return bucketPixels > other.bucketPixels;
-            }
-            return baseCoatOrder < other.baseCoatOrder;
+    private List<Integer> scriptedAnchors(SmartCanvas canvas) {
+        if (canvas.width() < 3 || canvas.height() < 3) {
+            return List.of();
         }
+        int centerX = Math.max(1, Math.min(canvas.width() - 2, (canvas.width() - 1) / 2));
+        int centerY = Math.max(1, Math.min(canvas.height() - 2, (canvas.height() - 1) / 2));
+        int[][] shuffledOffsets = {
+                {0, 0},
+                {1, 1},
+                {-1, 0},
+                {1, -1},
+                {0, 1},
+                {-1, -1},
+                {1, 0},
+                {-1, 1},
+                {0, -1}
+        };
+        ArrayList<Integer> anchors = new ArrayList<>(9);
+        for (int[] offset : shuffledOffsets) {
+            anchors.add(CanvasMath.toIndex(centerX + offset[0], centerY + offset[1], canvas.width()));
+        }
+        return List.copyOf(anchors);
+    }
+
+    private SmartPreview preview(int oldTicks, int originalWrong, List<PaintAction> actions,
+                                 ArtMapColor dominant, ArtMapColor baseCoat, String reason,
+                                 int componentCount, int smartTicks) {
+        int manual = 0;
+        int drags = 0;
+        for (PaintAction action : actions) {
+            if (action.type() == PaintActionType.MANUAL_CLICK) {
+                manual++;
+            } else if (action.type() == PaintActionType.DRAG_RUN) {
+                drags++;
+            }
+        }
+        int bucketActions = baseCoat == null ? 0 : 1;
+        String risk = baseCoat == null ? "blocked" : "low";
+        return new SmartPreview(oldTicks, originalWrong * Math.max(1, oldTicks / Math.max(1, originalWrong)),
+                smartTicks, oldTicks - smartTicks, manual, drags, bucketActions, 0,
+                0, 0, 0, originalWrong, componentCount, dominant, baseCoat,
+                baseCoat != null, reason, risk);
     }
 }

@@ -9,11 +9,15 @@ public record SmartPreview(
         int dragActions,
         int bucketActions,
         int unsafeBucketCandidates,
+        int perimeterActions,
+        int perimeterPixels,
+        int interiorBucketCandidates,
         int wrongPixels,
         int componentCount,
         ArtMapColor dominantColor,
         ArtMapColor selectedBaseCoatColor,
         boolean baseCoatPlanned,
+        String baseCoatReason,
         String riskLevel
 ) {
     public String summary() {
@@ -25,9 +29,14 @@ public record SmartPreview(
                 + " savings=" + expectedSavingsTicks
                 + " dominant=" + dominant
                 + " basecoat=" + baseCoat
+                + " basecoatFirst=" + baseCoatPlanned
+                + " basecoatReason=\"" + baseCoatReason + "\""
                 + " buckets=" + bucketActions
                 + " dragRuns=" + dragActions
                 + " manual=" + manualActions
+                + " perimeterActions=" + perimeterActions
+                + " perimeterPixels=" + perimeterPixels
+                + " interiorBucketCandidates=" + interiorBucketCandidates
                 + " unsafeBuckets=" + unsafeBucketCandidates
                 + " components=" + componentCount
                 + " wrongPixels=" + wrongPixels

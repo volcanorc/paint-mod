@@ -48,14 +48,15 @@ public final class CommandGuide {
             new Entry("dragthreshold <number>", "Set minimum smart drag run.")
     );
     private static final List<Entry> BUCKET = List.of(
-            new Entry("on", "Enable smart bucket fills."),
-            new Entry("off", "Disable smart bucket fills."),
+            new Entry("on", "Enable the initial dominant-color bucket base coat."),
+            new Entry("off", "Disable the initial bucket base coat."),
             new Entry("status", "Show bucket guard/timing."),
-            new Entry("preview", "Estimate smart bucket route."),
-            new Entry("repeats <number>", "Set right-click repeats."),
-            new Entry("gap <ticks>", "Set repeat gap."),
-            new Entry("swapdelay <ticks>", "Set pre-bucket delay."),
-            new Entry("afterdelay <ticks>", "Set post-bucket delay.")
+            new Entry("preview", "Preview the prepared initial base coat and drag route."),
+            new Entry("selectdelay <ticks>", "Set dominant-color selection delay."),
+            new Entry("swapdelay <ticks>", "Set hand-swap verification delay."),
+            new Entry("aimdelay <ticks>", "Set fill-anchor aim delay."),
+            new Entry("afterdelay <ticks>", "Set post-fill delay."),
+            new Entry("restoredelay <ticks>", "Set hand-restoration delay.")
     );
     private static final List<Entry> PALETTE = List.of(
             new Entry("status", "Show loaded and usable colors."),

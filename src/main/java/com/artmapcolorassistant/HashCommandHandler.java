@@ -783,7 +783,7 @@ public final class HashCommandHandler {
 
     private void handleBucket(String[] parts, SessionController.MessageSink sink) {
         if (parts.length < 2) {
-            sink.error("Usage: #painting bucket on|off|status|preview|repeats <number>|gap <ticks>|swapdelay <ticks>|afterdelay <ticks>");
+            sink.error("Usage: #painting bucket on|off|status|preview|selectdelay|swapdelay|aimdelay|afterdelay|restoredelay <ticks>");
             return;
         }
         String bucketCommand = parts[1].toLowerCase(Locale.ROOT);
@@ -803,11 +803,12 @@ public final class HashCommandHandler {
             }
             case "status" -> bucketStatus(sink);
             case "preview" -> smartPreview(sink);
-            case "repeats" -> handleBucketNumber(parts, "repeats", sink);
-            case "gap" -> handleBucketNumber(parts, "gap", sink);
+            case "selectdelay" -> handleBucketNumber(parts, "selectdelay", sink);
             case "swapdelay" -> handleBucketNumber(parts, "swapdelay", sink);
+            case "aimdelay" -> handleBucketNumber(parts, "aimdelay", sink);
             case "afterdelay" -> handleBucketNumber(parts, "afterdelay", sink);
-            default -> sink.error("Usage: #painting bucket on|off|status|preview|repeats <number>|gap <ticks>|swapdelay <ticks>|afterdelay <ticks>");
+            case "restoredelay" -> handleBucketNumber(parts, "restoredelay", sink);
+            default -> sink.error("Usage: #painting bucket on|off|status|preview|selectdelay|swapdelay|aimdelay|afterdelay|restoredelay <ticks>");
         }
     }
 
@@ -819,10 +820,11 @@ public final class HashCommandHandler {
         try {
             int value = Integer.parseInt(parts[2]);
             switch (key) {
-                case "repeats" -> configManager.setBucketClickRepeats(value, text -> sink.error(text.getString()));
-                case "gap" -> configManager.setBucketClickGapTicks(value, text -> sink.error(text.getString()));
-                case "swapdelay" -> configManager.setBucketSwapDelayTicks(value, text -> sink.error(text.getString()));
-                case "afterdelay" -> configManager.setBucketAfterDelayTicks(value, text -> sink.error(text.getString()));
+                case "selectdelay" -> configManager.setBucketClickRepeats(value, text -> sink.error(text.getString()));
+                case "swapdelay" -> configManager.setBucketClickGapTicks(value, text -> sink.error(text.getString()));
+                case "aimdelay" -> configManager.setBucketSwapDelayTicks(value, text -> sink.error(text.getString()));
+                case "afterdelay" -> configManager.setBucketAimSettleTicks(value, text -> sink.error(text.getString()));
+                case "restoredelay" -> configManager.setBucketAfterDelayTicks(value, text -> sink.error(text.getString()));
                 default -> {
                 }
             }
@@ -835,11 +837,12 @@ public final class HashCommandHandler {
     private void bucketStatus(SessionController.MessageSink sink) {
         ConfigManager.Config config = configManager.config();
         sink.info("Bucket enabled=" + config.bucketEnabled()
-                + " repeats=" + config.bucketClickRepeats()
-                + " gap=" + config.bucketClickGapTicks()
-                + " swapDelay=" + config.bucketSwapDelayTicks()
-                + " aimSettle=" + config.bucketAimSettleTicks()
-                + " afterDelay=" + config.bucketAfterDelayTicks()
+                + " mode=single-initial-left-click"
+                + " colorSelectDelay=" + config.bucketColorSelectDelayTicks()
+                + " handSwapDelay=" + config.bucketHandSwapDelayTicks()
+                + " fillAimSettle=" + config.bucketFillAimSettleTicks()
+                + " postFillDelay=" + config.bucketPostFillDelayTicks()
+                + " handRestoreDelay=" + config.bucketHandRestoreDelayTicks()
                 + " offhandExactEmptyBucket=" + controller.exactEmptyBucketInOffhand() + ".");
     }
 

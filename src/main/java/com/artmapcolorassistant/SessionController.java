@@ -326,6 +326,26 @@ public final class SessionController {
         return inventoryHelper.exactEmptyBucketInOffhand();
     }
 
+    public boolean itemExists(ArtMapColor color) {
+        return inventoryHelper.itemExists(color);
+    }
+
+    public boolean bucketPairReady(ArtMapColor color) {
+        return inventoryHelper.bucketPairReady(color);
+    }
+
+    public boolean bucketPairSwapped(ArtMapColor color) {
+        return inventoryHelper.bucketPairSwapped(color);
+    }
+
+    public boolean requestSwapHands() {
+        return inventoryHelper.requestSwapHands();
+    }
+
+    public String bucketHandStatus(ArtMapColor color) {
+        return inventoryHelper.bucketHandStatus(color);
+    }
+
     public void finishSmart(MessageSink sink) {
         finish(sink);
     }

@@ -31,6 +31,13 @@ class PaintingModeTest {
         assertTrue(config.autoDetectCalibrationDirectionOnAutoStart());
         assertEquals(45.0D, config.cardinalDirectionToleranceDegrees());
         assertTrue(config.autoEnablePortableForBundledCalibration());
+        assertEquals(10, config.bucketColorSelectDelayTicks());
+        assertEquals(20, config.bucketHandSwapDelayTicks());
+        assertEquals(16, config.bucketFillAimSettleTicks());
+        assertEquals(24, config.bucketPostFillDelayTicks());
+        assertEquals(10, config.bucketHandRestoreDelayTicks());
+        assertEquals(5, config.autoDragPixelTicks());
+        assertEquals(2, config.smartDragThreshold());
         assertEquals(5, config.autoPaintDefaultDelayTicks());
     }
 
@@ -78,6 +85,11 @@ class PaintingModeTest {
         assertTrue(config.autoSwapFromInventory());
         assertTrue(config.postPaintAutomationEnabled());
         assertEquals("ee", config.selectedCalibrationName());
+        assertEquals(10, config.bucketColorSelectDelayTicks());
+        assertEquals(20, config.bucketHandSwapDelayTicks());
+        assertEquals(16, config.bucketFillAimSettleTicks());
+        assertEquals(24, config.bucketPostFillDelayTicks());
+        assertEquals(10, config.bucketHandRestoreDelayTicks());
     }
 
     @Test

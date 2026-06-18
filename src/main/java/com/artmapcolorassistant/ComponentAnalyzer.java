@@ -2,7 +2,9 @@ package com.artmapcolorassistant;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class ComponentAnalyzer {
     private ComponentAnalyzer() {
@@ -28,10 +30,37 @@ public final class ComponentAnalyzer {
                 component.add(index);
                 int x = CanvasMath.toX(index, canvas.width());
                 int y = CanvasMath.toY(index, canvas.width());
-                enqueue(canvas, visited, queue, x - 1, y);
-                enqueue(canvas, visited, queue, x + 1, y);
-                enqueue(canvas, visited, queue, x, y - 1);
-                enqueue(canvas, visited, queue, x, y + 1);
+                enqueueSameWrongTargetColor(canvas, visited, queue, color, x - 1, y);
+                enqueueSameWrongTargetColor(canvas, visited, queue, color, x + 1, y);
+                enqueueSameWrongTargetColor(canvas, visited, queue, color, x, y - 1);
+                enqueueSameWrongTargetColor(canvas, visited, queue, color, x, y + 1);
+            }
+            components.add(component);
+        }
+        return components;
+    }
+
+    public static List<List<Integer>> targetColorComponents(SmartCanvas canvas) {
+        boolean[] visited = new boolean[canvas.size()];
+        ArrayList<List<Integer>> components = new ArrayList<>();
+        for (int i = 0; i < canvas.size(); i++) {
+            if (visited[i] || canvas.skipped(i) || canvas.targetColor(i) == null) {
+                continue;
+            }
+            ArtMapColor color = canvas.targetColor(i);
+            ArrayList<Integer> component = new ArrayList<>();
+            ArrayDeque<Integer> queue = new ArrayDeque<>();
+            visited[i] = true;
+            queue.add(i);
+            while (!queue.isEmpty()) {
+                int index = queue.removeFirst();
+                component.add(index);
+                int x = CanvasMath.toX(index, canvas.width());
+                int y = CanvasMath.toY(index, canvas.width());
+                enqueueSameTargetColor(canvas, visited, queue, color, x - 1, y);
+                enqueueSameTargetColor(canvas, visited, queue, color, x + 1, y);
+                enqueueSameTargetColor(canvas, visited, queue, color, x, y - 1);
+                enqueueSameTargetColor(canvas, visited, queue, color, x, y + 1);
             }
             components.add(component);
         }
@@ -64,14 +93,59 @@ public final class ComponentAnalyzer {
         return run.size() >= minLength ? run : List.of();
     }
 
-    private static void enqueue(SmartCanvas canvas, boolean[] visited, ArrayDeque<Integer> queue, int x, int y) {
+    public static ShapeComponent shape(SmartCanvas canvas, List<Integer> component) {
+        if (canvas == null || component == null || component.isEmpty()) {
+            return new ShapeComponent(List.of(), List.of());
+        }
+        Set<Integer> set = new HashSet<>(component);
+        ArrayList<Integer> perimeter = new ArrayList<>();
+        ArrayList<Integer> interior = new ArrayList<>();
+        for (int index : component) {
+            int x = CanvasMath.toX(index, canvas.width());
+            int y = CanvasMath.toY(index, canvas.width());
+            boolean edge = x == 0 || y == 0 || x == canvas.width() - 1 || y == canvas.height() - 1;
+            boolean boundary = edge
+                    || !set.contains(CanvasMath.toIndex(x - 1, y, canvas.width()))
+                    || !set.contains(CanvasMath.toIndex(x + 1, y, canvas.width()))
+                    || !set.contains(CanvasMath.toIndex(x, y - 1, canvas.width()))
+                    || !set.contains(CanvasMath.toIndex(x, y + 1, canvas.width()));
+            if (boundary) {
+                perimeter.add(index);
+            } else {
+                interior.add(index);
+            }
+        }
+        return new ShapeComponent(List.copyOf(perimeter), List.copyOf(interior));
+    }
+
+    private static void enqueueSameWrongTargetColor(SmartCanvas canvas, boolean[] visited, ArrayDeque<Integer> queue,
+                                                   ArtMapColor color, int x, int y) {
         if (x < 0 || y < 0 || x >= canvas.width() || y >= canvas.height()) {
             return;
         }
         int index = CanvasMath.toIndex(x, y, canvas.width());
-        if (!visited[index]) {
+        if (!visited[index]
+                && canvas.wrong(index)
+                && SmartCanvas.sameColor(color, canvas.targetColor(index))) {
             visited[index] = true;
             queue.add(index);
         }
+    }
+
+    private static void enqueueSameTargetColor(SmartCanvas canvas, boolean[] visited, ArrayDeque<Integer> queue,
+                                               ArtMapColor color, int x, int y) {
+        if (x < 0 || y < 0 || x >= canvas.width() || y >= canvas.height()) {
+            return;
+        }
+        int index = CanvasMath.toIndex(x, y, canvas.width());
+        if (!visited[index]
+                && !canvas.skipped(index)
+                && SmartCanvas.sameColor(color, canvas.targetColor(index))) {
+            visited[index] = true;
+            queue.add(index);
+        }
+    }
+
+    public record ShapeComponent(List<Integer> perimeter, List<Integer> interior) {
     }
 }

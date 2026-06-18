@@ -185,8 +185,7 @@ public final class BatchManager {
                 }
                 return true;
             }
-            autoPainter.start(config, sink);
-            return autoPainter.running();
+            return false;
         }
         if (smartPainter.running()) {
             smartPainter.stop(sink);

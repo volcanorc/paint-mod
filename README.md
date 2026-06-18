@@ -63,6 +63,9 @@ The default emergency stop key is `O`. You can change it in Minecraft under `Opt
 - `#painting auto stop`, `pause`, `resume`, `status`.
 - `#painting auto speed <ticks>` sets the delay between auto-painted pixels.
 - `#painting auto drag on|off|status` toggles same-color row dragging.
+- `#painting smart preview` prepares and summarizes the dominant base coat and connected drag plan without painting.
+- `#painting bucket status` shows the guarded single initial bucket sequence and its delays.
+- `#painting bucket selectdelay|swapdelay|aimdelay|afterdelay|restoredelay <ticks>` adjusts each bucket stage.
 
 `#paint stop`, `#painting stop`, `#painting auto stop`, the GUI stop button, and the Stop Painting keybind are the intended stop controls. Opening chat or pressing Esc does not intentionally stop auto painting. Auto paint refreshes the crosshair target before sending the normal client click interaction, but background clicking while alt-tabbed is still best-effort and depends on Minecraft and the operating system continuing client ticks.
 
@@ -118,7 +121,27 @@ A 32x32 canvas has 1024 pixels, so a full painting takes about 17 minutes and 4 
 
 Do not use faster automation unless server rules allow it.
 
-## Same-Color Row Drag
+## Smart Initial Base Coat And Connected Drag
+
+Smart mode prepares one bounded plan when an image starts. It finds the most frequent nonblank color, equips that item, verifies an exact empty bucket in the offhand, swaps hands, and performs one guarded left click near the calibrated canvas center. Nine fixed shuffled near-center anchors are used three at a time and loop after three images. The fill-click guard survives pause/resume so a completed bucket click cannot be sent twice. The mod then verifies that the bucket and color item are restored to their original hands before continuing.
+
+The base coat is the only bucket action. Once it succeeds, every target pixel using the dominant color is considered complete and is excluded from later painting. Images containing transparent `SKIP` pixels do not start in smart mode because a whole-canvas fill could not preserve those pixels.
+
+Remaining same-color pixels that touch by an edge are painted as calibrated drag trails. Trails may move horizontally, vertically, and around turns; diagonal-only contact is not treated as connected. Branched trails may safely revisit a junction with the same color. Manual clicks are reserved for isolated one-pixel components.
+
+Smart connected trails dwell for exactly 3 ticks (about 150 ms at 20 TPS) at each calibrated waypoint. This Smart-only timing does not change Classic Auto row dragging, the 2-tick starting hold, the 1-tick ending hold, or the 5-tick post-trail delay.
+
+Smart bucket defaults in config:
+
+- `bucketColorSelectDelayTicks`: `10`
+- `bucketHandSwapDelayTicks`: `20`
+- `bucketFillAimSettleTicks`: `16`
+- `bucketPostFillDelayTicks`: `24`
+- `bucketHandRestoreDelayTicks`: `10`
+
+If an item, hand state, or exact calibration cannot be verified, smart mode pauses before changing the canvas rather than falling back to classic auto.
+
+## Classic Auto Same-Color Row Drag
 
 Auto drag is enabled by default. When two or more adjacent pixels in the same row use the same ArtMap item and every pixel in that run has exact calibration, the mod holds right-click, moves through those calibrated pixel centers, and releases at the end of the row run.
 
@@ -134,7 +157,7 @@ Drag settings in config:
 
 - `autoDragSameColorRuns`: default `true`
 - `autoDragMinRunLength`: default `2`
-- `autoDragPixelTicks`: default `2`
+- `autoDragPixelTicks`: default `5`
 - `autoDragRequireExactCalibration`: default `true`
 - `autoDragStartHoldTicks`: default `2`
 - `autoDragEndHoldTicks`: default `1`

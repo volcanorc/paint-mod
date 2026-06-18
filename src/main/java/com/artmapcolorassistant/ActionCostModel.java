@@ -16,11 +16,11 @@ public final class ActionCostModel {
     }
 
     public static int bucket(ConfigManager.Config config) {
-        int repeats = Math.max(1, config.bucketClickRepeats());
-        return Math.max(0, config.bucketSwapDelayTicks())
-                + Math.max(0, config.bucketAimSettleTicks())
-                + repeats
-                + Math.max(0, repeats - 1) * Math.max(0, config.bucketClickGapTicks())
-                + Math.max(0, config.bucketAfterDelayTicks());
+        return config.bucketColorSelectDelayTicks()
+                + config.bucketHandSwapDelayTicks()
+                + config.bucketFillAimSettleTicks()
+                + 1
+                + config.bucketPostFillDelayTicks()
+                + config.bucketHandRestoreDelayTicks();
     }
 }

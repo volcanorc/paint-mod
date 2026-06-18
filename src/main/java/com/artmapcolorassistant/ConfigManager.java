@@ -126,6 +126,9 @@ public final class ConfigManager {
         if (autoDragPixelTicks == 1) {
             autoDragPixelTicks = defaults.autoDragPixelTicks;
         }
+        if (!root.has("bucketColorSelectDelayTicks") && autoDragPixelTicks == 2) {
+            autoDragPixelTicks = 5;
+        }
         boolean autoDragRequireExactCalibration = boolValue(root, "autoDragRequireExactCalibration", defaults.autoDragRequireExactCalibration);
         int autoDragStartHoldTicks = Math.max(0, intValue(root, "autoDragStartHoldTicks", defaults.autoDragStartHoldTicks));
         int autoDragEndHoldTicks = Math.max(0, intValue(root, "autoDragEndHoldTicks", defaults.autoDragEndHoldTicks));
@@ -135,11 +138,11 @@ public final class ConfigManager {
         int smartBucketThreshold = Math.max(2, intValue(root, "smartBucketThreshold", defaults.smartBucketThreshold));
         int smartDragThreshold = Math.max(2, intValue(root, "smartDragThreshold", defaults.smartDragThreshold));
         boolean bucketEnabled = boolValue(root, "bucketEnabled", defaults.bucketEnabled);
-        int bucketClickRepeats = clamp(intValue(root, "bucketClickRepeats", defaults.bucketClickRepeats), 1, 4);
-        int bucketClickGapTicks = Math.max(0, intValue(root, "bucketClickGapTicks", defaults.bucketClickGapTicks));
-        int bucketSwapDelayTicks = Math.max(0, intValue(root, "bucketSwapDelayTicks", defaults.bucketSwapDelayTicks));
-        int bucketAimSettleTicks = Math.max(0, intValue(root, "bucketAimSettleTicks", defaults.bucketAimSettleTicks));
-        int bucketAfterDelayTicks = Math.max(0, intValue(root, "bucketAfterDelayTicks", defaults.bucketAfterDelayTicks));
+        int bucketClickRepeats = Math.max(0, intValue(root, "bucketColorSelectDelayTicks", defaults.bucketClickRepeats));
+        int bucketClickGapTicks = Math.max(0, intValue(root, "bucketHandSwapDelayTicks", defaults.bucketClickGapTicks));
+        int bucketSwapDelayTicks = Math.max(0, intValue(root, "bucketFillAimSettleTicks", defaults.bucketSwapDelayTicks));
+        int bucketAimSettleTicks = Math.max(0, intValue(root, "bucketPostFillDelayTicks", defaults.bucketAimSettleTicks));
+        int bucketAfterDelayTicks = Math.max(0, intValue(root, "bucketHandRestoreDelayTicks", defaults.bucketAfterDelayTicks));
         String selectedCalibrationName = sanitizeCalibrationName(stringValue(root, "selectedCalibrationName", defaults.selectedCalibrationName));
         boolean serverColorOverridesEnabled = boolValue(root, "serverColorOverridesEnabled", defaults.serverColorOverridesEnabled);
         boolean batchAutoStartAfterContinue = boolValue(root, "batchAutoStartAfterContinue", defaults.batchAutoStartAfterContinue);
@@ -304,11 +307,11 @@ public final class ConfigManager {
         root.addProperty("smartBucketThreshold", value.smartBucketThreshold);
         root.addProperty("smartDragThreshold", value.smartDragThreshold);
         root.addProperty("bucketEnabled", value.bucketEnabled);
-        root.addProperty("bucketClickRepeats", value.bucketClickRepeats);
-        root.addProperty("bucketClickGapTicks", value.bucketClickGapTicks);
-        root.addProperty("bucketSwapDelayTicks", value.bucketSwapDelayTicks);
-        root.addProperty("bucketAimSettleTicks", value.bucketAimSettleTicks);
-        root.addProperty("bucketAfterDelayTicks", value.bucketAfterDelayTicks);
+        root.addProperty("bucketColorSelectDelayTicks", value.bucketColorSelectDelayTicks());
+        root.addProperty("bucketHandSwapDelayTicks", value.bucketHandSwapDelayTicks());
+        root.addProperty("bucketFillAimSettleTicks", value.bucketFillAimSettleTicks());
+        root.addProperty("bucketPostFillDelayTicks", value.bucketPostFillDelayTicks());
+        root.addProperty("bucketHandRestoreDelayTicks", value.bucketHandRestoreDelayTicks());
         root.addProperty("selectedCalibrationName", value.selectedCalibrationName);
         root.addProperty("serverColorOverridesEnabled", value.serverColorOverridesEnabled);
         root.addProperty("batchAutoStartAfterContinue", value.batchAutoStartAfterContinue);
@@ -423,27 +426,33 @@ public final class ConfigManager {
     }
 
     public void setBucketClickRepeats(int value, Consumer<Text> warningSink) {
-        config = config.withBucketSettings(config.bucketEnabled(), clamp(value, 1, 4), config.bucketClickGapTicks(),
+        config = config.withBucketSettings(config.bucketEnabled(), Math.max(0, value), config.bucketClickGapTicks(),
                 config.bucketSwapDelayTicks(), config.bucketAimSettleTicks(), config.bucketAfterDelayTicks());
-        saveConfigChange("bucket click repeats", warningSink);
+        saveConfigChange("bucket color select delay", warningSink);
     }
 
     public void setBucketClickGapTicks(int value, Consumer<Text> warningSink) {
         config = config.withBucketSettings(config.bucketEnabled(), config.bucketClickRepeats(), Math.max(0, value),
                 config.bucketSwapDelayTicks(), config.bucketAimSettleTicks(), config.bucketAfterDelayTicks());
-        saveConfigChange("bucket click gap", warningSink);
+        saveConfigChange("bucket hand swap delay", warningSink);
     }
 
     public void setBucketSwapDelayTicks(int value, Consumer<Text> warningSink) {
         config = config.withBucketSettings(config.bucketEnabled(), config.bucketClickRepeats(), config.bucketClickGapTicks(),
                 Math.max(0, value), config.bucketAimSettleTicks(), config.bucketAfterDelayTicks());
-        saveConfigChange("bucket swap delay", warningSink);
+        saveConfigChange("bucket fill aim settle", warningSink);
+    }
+
+    public void setBucketAimSettleTicks(int value, Consumer<Text> warningSink) {
+        config = config.withBucketSettings(config.bucketEnabled(), config.bucketClickRepeats(), config.bucketClickGapTicks(),
+                config.bucketSwapDelayTicks(), Math.max(0, value), config.bucketAfterDelayTicks());
+        saveConfigChange("bucket post-fill delay", warningSink);
     }
 
     public void setBucketAfterDelayTicks(int value, Consumer<Text> warningSink) {
         config = config.withBucketSettings(config.bucketEnabled(), config.bucketClickRepeats(), config.bucketClickGapTicks(),
                 config.bucketSwapDelayTicks(), config.bucketAimSettleTicks(), Math.max(0, value));
-        saveConfigChange("bucket after delay", warningSink);
+        saveConfigChange("bucket hand restore delay", warningSink);
     }
 
     public void setPostPaintRenameClickPoint(RecordedClickPoint point, Consumer<Text> warningSink) {
@@ -682,6 +691,26 @@ public final class ConfigManager {
             return effectiveArtMapColors;
         }
 
+        public int bucketColorSelectDelayTicks() {
+            return bucketClickRepeats;
+        }
+
+        public int bucketHandSwapDelayTicks() {
+            return bucketClickGapTicks;
+        }
+
+        public int bucketFillAimSettleTicks() {
+            return bucketSwapDelayTicks;
+        }
+
+        public int bucketPostFillDelayTicks() {
+            return bucketAimSettleTicks;
+        }
+
+        public int bucketHandRestoreDelayTicks() {
+            return bucketAfterDelayTicks;
+        }
+
         public Config withSelectedCalibrationName(String value) {
             return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
                     advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
@@ -743,6 +772,9 @@ public final class ConfigManager {
             boolean nextDrag = nextMode != PaintingMode.MANUAL;
             boolean nextPostPaint = nextMode == PaintingMode.MANUAL ? postPaintAutomationEnabled : true;
             int nextSpeed = 5;
+            int nextBucketRepeats = nextMode == PaintingMode.SMART ? 10 : bucketClickRepeats;
+            int nextBucketGapTicks = nextMode == PaintingMode.SMART ? 20 : bucketClickGapTicks;
+            int nextBucketAfterDelayTicks = nextMode == PaintingMode.SMART ? 10 : bucketAfterDelayTicks;
             return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, true,
                     advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
                     alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
@@ -755,8 +787,8 @@ public final class ConfigManager {
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, nextSmart, smartMode,
                     smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, nextBucket,
-                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
-                    bucketAfterDelayTicks, "ee",
+                    nextBucketRepeats, nextBucketGapTicks, 16, 24,
+                    nextBucketAfterDelayTicks, "ee",
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
                     nextSpeed, nextDrag, nextPostPaint,
                     postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
@@ -902,8 +934,8 @@ public final class ConfigManager {
                     TransparentPixelMode.SKIP, false, true, ColorMatchMode.RGB, false, false, PaintingMode.SMART,
                     5, 5, AutoClickButton.RIGHT, 2, 0.75D, true, true, false,
                     true, "ee", true, 45.0D, true,
-                    true, 2, 2, true, 2, 1, true, SmartPaintMode.AGGRESSIVE,
-                    true, 10, 5, true, 1, 2, 6, 2, 10, "ee", true, List.copyOf(overrides),
+                    true, 2, 5, true, 2, 1, true, SmartPaintMode.AGGRESSIVE,
+                    true, 10, 2, true, 10, 20, 16, 24, 10, "ee", true, List.copyOf(overrides),
                     true, 5, true, true, 2, 0, 1, 500, "/pv 2", 2, 3, 20, 2, true, 5, 2, 4, null, null,
                     List.copyOf(colors), overrideResult.colors());
         }
