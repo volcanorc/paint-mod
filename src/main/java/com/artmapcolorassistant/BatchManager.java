@@ -104,6 +104,10 @@ public final class BatchManager {
         return active;
     }
 
+    public boolean paintingActive() {
+        return paintingActive;
+    }
+
     public void tick(SessionController.MessageSink sink) {
         if (!active || !paintingActive) {
             tickPostPaint(sink);

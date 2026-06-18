@@ -53,13 +53,7 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         keybindHandler = new KeybindHandler();
         keybindHandler.register();
 
-        ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
-            if (HashCommandHandler.isPaintingCommand(message)) {
-                handleLocalPaintingCommand(message);
-                return false;
-            }
-            return true;
-        });
+        ClientSendMessageEvents.ALLOW_CHAT.register(message -> !handleLocalHashMessage(message));
 
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
         new HudOverlay(client, controller, autoPainter, calibrationManager, calibrationMarkerRenderer).register();
@@ -70,12 +64,18 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         if (!HashCommandHandler.isPaintingCommand(message)) {
             return false;
         }
+        return handleLocalHashMessage(message);
+    }
+
+    public static boolean handleLocalHashMessage(String message) {
+        if (!HashCommandHandler.isHashPrefixedMessage(message)) {
+            return false;
+        }
         if (instance == null || instance.commandHandler == null) {
-            LOGGER.warn("Canceled local painting command before ArtMapColorAssistant was fully initialized.");
+            LOGGER.warn("Canceled hash-prefixed chat message before ArtMapColorAssistant was fully initialized.");
             return true;
         }
-        instance.commandHandler.handle(message, instance.sink());
-        return true;
+        return instance.commandHandler.handleHashMessage(message, instance.sink());
     }
 
     public static void requestGuiOpen() {

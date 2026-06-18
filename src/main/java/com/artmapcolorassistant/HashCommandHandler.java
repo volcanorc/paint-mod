@@ -45,11 +45,25 @@ public final class HashCommandHandler {
     }
 
     public static boolean isPaintingCommand(String raw) {
-        if (raw == null) {
+        return HashMessagePolicy.classify(raw) == HashMessagePolicy.Classification.PAINTING_COMMAND;
+    }
+
+    public static boolean isHashPrefixedMessage(String raw) {
+        return HashMessagePolicy.classify(raw) != HashMessagePolicy.Classification.NORMAL_CHAT;
+    }
+
+    public boolean handleHashMessage(String raw, SessionController.MessageSink sink) {
+        HashMessagePolicy.Classification classification = HashMessagePolicy.classify(raw);
+        if (classification == HashMessagePolicy.Classification.NORMAL_CHAT) {
             return false;
         }
-        String trimmed = raw.trim();
-        return trimmed.startsWith("#painting") || trimmed.startsWith("#paint");
+        if (classification == HashMessagePolicy.Classification.PAINTING_COMMAND) {
+            handle(raw, sink);
+            return true;
+        }
+        sink.error("That is not a correct ArtMap command. It was blocked and not sent to the server.");
+        help(sink);
+        return true;
     }
 
     public void handle(String raw, SessionController.MessageSink sink) {
@@ -627,43 +641,46 @@ public final class HashCommandHandler {
         }
     }
 
-    private void startAutoOrSmart(SessionController.MessageSink sink) {
+    private boolean startAutoOrSmart(SessionController.MessageSink sink) {
         ConfigManager.Config config = configManager.config();
-        switch (config.paintingMode()) {
+        return switch (config.paintingMode()) {
             case MANUAL -> startManualAssist(sink);
             case AUTO -> {
                 if (controller.session() == null) {
                     sink.error("No active painting session. Start with #painting <image.png> first.");
-                    return;
+                    yield false;
                 }
                 if (smartPainter.running()) {
                     smartPainter.stop(sink);
                 }
                 if (!calibrationManager.prepareBundledDirectionalCalibration(config, sink)) {
-                    return;
+                    yield false;
                 }
                 autoPainter.start(config, sink);
+                yield autoPainter.running();
             }
             case SMART -> {
                 if (controller.session() == null) {
                     sink.error("No active painting session. Start with #painting <image.png> first.");
-                    return;
+                    yield false;
                 }
                 if (!calibrationManager.prepareBundledDirectionalCalibration(config, sink)) {
-                    return;
+                    yield false;
                 }
                 if (smartPainter.start(config, sink)) {
                     if (autoPainter.running()) {
                         autoPainter.stop(sink);
                     }
+                    yield true;
                 } else {
                     autoPainter.start(config, sink);
+                    yield autoPainter.running();
                 }
             }
-        }
+        };
     }
 
-    private void startManualAssist(SessionController.MessageSink sink) {
+    private boolean startManualAssist(SessionController.MessageSink sink) {
         if (smartPainter.running()) {
             smartPainter.stop(sink);
         }
@@ -672,10 +689,11 @@ public final class HashCommandHandler {
         }
         if (controller.session() == null) {
             sink.error("No active painting session. Start with #painting <image.png> first.");
-            return;
+            return false;
         }
         controller.switchCurrentNow(sink);
         sink.info("Manual assisted painting ready. The mod will swap to the next color after each allowed user click.");
+        return true;
     }
 
     private void startImage(String filename, SessionController.MessageSink sink) {
@@ -892,6 +910,13 @@ public final class HashCommandHandler {
 
     void runLocal(String command, SessionController.MessageSink sink) {
         handle(command, sink);
+    }
+
+    boolean paintNow(String filename, SessionController.MessageSink sink) {
+        return GuardedPaintStarter.start(filename,
+                () -> stopPaintersBeforeSessionReplace(sink),
+                name -> controller.start(name, sink),
+                () -> startAutoOrSmart(sink));
     }
 
     private void help(SessionController.MessageSink sink) {

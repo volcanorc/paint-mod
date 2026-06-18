@@ -13,136 +13,188 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class PaintingControlScreen extends Screen {
+    private static final int SCREEN_DIM = 0x66000000;
+    private static final int PANEL_BACKGROUND = 0x52000000;
+    private static final int ROW_BACKGROUND = 0x24000000;
+    private static final int ACTIVE_GLOW = 0x3055FF55;
+    private static final int ENABLED_COLOR = 0x55FF55;
+    private static final int DISABLED_COLOR = 0xFF5555;
+
     private final HashCommandHandler commandHandler;
     private final AutoPainter autoPainter;
-    private final CalibrationManager calibrationManager;
     private final ConfigManager configManager;
     private final BatchManager batchManager;
-    private final List<SectionLabel> sectionLabels = new ArrayList<>();
-    private boolean confirmCalibrationRestart;
+    private final List<Label> labels = new ArrayList<>();
+    private final List<Rectangle> rowBackgrounds = new ArrayList<>();
+    private final List<Rectangle> glows = new ArrayList<>();
     private boolean needsRefresh;
+    private int panelLeft;
+    private int panelRight;
+    private int panelBottom;
 
     public PaintingControlScreen(HashCommandHandler commandHandler, AutoPainter autoPainter,
-                                 CalibrationManager calibrationManager, ConfigManager configManager, BatchManager batchManager) {
-        super(Text.literal("ArtMap Controls"));
+                                 CalibrationManager calibrationManager, ConfigManager configManager,
+                                 BatchManager batchManager) {
+        super(Text.literal("ArtMap Painting Controls"));
         this.commandHandler = commandHandler;
         this.autoPainter = autoPainter;
-        this.calibrationManager = calibrationManager;
         this.configManager = configManager;
         this.batchManager = batchManager;
     }
 
     @Override
     protected void init() {
-        sectionLabels.clear();
-        int buttonWidth = 150;
-        int buttonHeight = 20;
-        int gap = 4;
-        int left = width / 2 - buttonWidth - 6;
-        int right = width / 2 + 6;
-        int y = 34;
-        String calibrationName = calibrationManager.lastCalibrationName();
+        labels.clear();
+        rowBackgrounds.clear();
+        glows.clear();
 
-        if (confirmCalibrationRestart) {
-            y = addSection("Calibration restart warning", y);
-            addButton(left, y, buttonWidth * 2 + 12, buttonHeight,
-                    Text.literal("Restart calibration " + calibrationName).formatted(Formatting.RED),
-                    "This clears the in-memory recording and starts fresh.", () -> {
-                        confirmCalibrationRestart = false;
-                        run("#painting calibrate start " + calibrationName);
-                    });
-            y += buttonHeight + gap;
-            addButton(left, y, buttonWidth * 2 + 12, buttonHeight,
-                    Text.literal("Cancel").formatted(Formatting.YELLOW),
-                    "Return without restarting the completed calibration.", () -> {
-                        confirmCalibrationRestart = false;
-                        refreshNextRender();
-                    });
-            return;
-        }
+        int panelWidth = Math.min(430, Math.max(300, width - 16));
+        panelLeft = (width - panelWidth) / 2;
+        panelRight = panelLeft + panelWidth;
+        int innerLeft = panelLeft + 10;
+        int innerRight = panelRight - 10;
+        int y = 26;
 
-        y = addSection("Auto", y);
-        addButton(left, y, buttonWidth, buttonHeight, "Start full auto", "Start full auto painting.", "#painting auto full");
-        addButton(right, y, buttonWidth, buttonHeight, "Stop auto", "Stop auto painting immediately.", "#painting auto stop");
-        y += buttonHeight + gap;
-        addButton(left, y, buttonWidth, buttonHeight, "Pause auto", "Pause auto painting.", "#painting auto pause");
-        addButton(right, y, buttonWidth, buttonHeight, "Resume auto", "Resume auto painting.", "#painting auto resume");
-        y += buttonHeight + gap;
-        addButton(left, y, buttonWidth, buttonHeight, "Status", "Show painting and auto status.", "#painting status");
-        addButton(right, y, buttonWidth, buttonHeight, "Auto status", "Show current auto state.", "#painting auto status");
+        labels.add(new Label("Painting Type", innerLeft, y, 0xFFFF55));
+        y += 12;
+        addModeButtons(innerLeft, innerRight, y);
+        y += 22;
 
-        y += buttonHeight + gap + 8;
-        y = addSection("Batch", y);
-        addButton(left, y, buttonWidth, buttonHeight, "Batch continue", "Start the next numbered batch image after manual setup.", "#painting batch continue");
-        addButton(right, y, buttonWidth, buttonHeight, "Batch status", "Show numbered image batch progress.", "#painting batch status");
-        y += buttonHeight + gap;
-        addButton(left, y, buttonWidth, buttonHeight, "Batch stop", "Stop the current batch queue.", "#painting batch stop");
-        addButton(right, y, buttonWidth, buttonHeight, "Batch help", "Show batch command format.", "#painting help");
+        labels.add(new Label("Features", innerLeft, y, 0xFFFF55));
+        y += 12;
+        y = addSpeedRow(innerLeft, innerRight, y);
+        y = addToggleRow("Painting Auto Drag", autoPainter.dragEnabled(), innerLeft, innerRight, y,
+                "Toggle same-color row dragging.",
+                "#painting auto drag " + (autoPainter.dragEnabled() ? "off" : "on"));
 
-        y += buttonHeight + gap + 8;
-        y = addSection("Drag", y);
-        Text dragText = Text.literal("Drag: " + (autoPainter.dragEnabled() ? "ON" : "OFF"))
-                .formatted(autoPainter.dragEnabled() ? Formatting.GREEN : Formatting.RED);
-        addButton(left, y, buttonWidth, buttonHeight, dragText,
-                "Toggle same-color row dragging. Drag mode holds right-click across calibrated same-color pixels in one row.",
-                () -> run("#painting auto drag " + (autoPainter.dragEnabled() ? "off" : "on")));
-        addButton(right, y, buttonWidth, buttonHeight, "Drag status", "Show auto drag status.", "#painting auto drag status");
+        ConfigManager.Config config = configManager.config();
+        y = addToggleRow("Smart Basecoat", config.smartBaseCoatEnabled(), innerLeft, innerRight, y,
+                "Toggle the smart dominant-color base coat.",
+                "#painting smart basecoat " + (config.smartBaseCoatEnabled() ? "off" : "on"));
+        y = addToggleRow("Painting Bucket", config.bucketEnabled(), innerLeft, innerRight, y,
+                "Toggle the guarded initial smart bucket action.",
+                "#painting bucket " + (config.bucketEnabled() ? "off" : "on"));
+        y = addToggleRow("Painting Post-paint", config.postPaintAutomationEnabled(), innerLeft, innerRight, y,
+                "Toggle guarded save, vault, and next-canvas automation.",
+                "#painting postpaint " + (config.postPaintAutomationEnabled() ? "off" : "on"));
+        y = addRenameRow(innerLeft, innerRight, y, config.postPaintRenameClickPoint() != null);
 
-        y += buttonHeight + gap + 8;
-        y = addSection("Calibration: " + calibrationName, y);
-        addButton(left, y, buttonWidth, buttonHeight, Text.literal("Current: " + calibrationName),
-                "Choose, use, continue, reset, or create a calibration.", () -> MinecraftClient.getInstance().setScreen(
-                        new CalibrationPickerScreen(commandHandler, autoPainter, calibrationManager, configManager, batchManager, this)));
-        addButton(right, y, buttonWidth, buttonHeight, "Calibration status", "Show calibration progress.", "#painting calibrate status");
-        y += buttonHeight + gap;
-        addButton(left, y, buttonWidth, buttonHeight, "Use " + calibrationName, "Load saved calibration '" + calibrationName + "'.", "#painting usecalibration " + calibrationName);
-        addButton(right, y, buttonWidth, buttonHeight, "Cal continue " + calibrationName,
-                "Continue calibration '" + calibrationName + "' from saved progress.", "#painting calibrate continue " + calibrationName);
-        y += buttonHeight + gap;
-        addButton(left, y, buttonWidth, buttonHeight, Text.literal("Cal start " + calibrationName),
-                "Start a fresh unsaved calibration using the last calibration name.", () -> startCalibrationFromGui(calibrationName));
-        addButton(right, y, buttonWidth, buttonHeight, "Cal save " + calibrationName,
-                "Save current calibration points to '" + calibrationName + "'.", "#painting calibrate save " + calibrationName);
-        y += buttonHeight + gap;
-        addButton(left, y, buttonWidth, buttonHeight, "Cal reset " + calibrationName,
-                "Delete saved calibration '" + calibrationName + "'.", "#painting calibrate reset " + calibrationName);
-        addButton(right, y, buttonWidth, buttonHeight, "Cal stop", "Stop calibration without saving.", "#painting calibrate stop");
-
-        y += buttonHeight + gap + 8;
-        y = addSection("Help", y);
-        addButton(left, y, buttonWidth, buttonHeight, "Help", "Show clickable command help.", "#painting help");
+        y += 4;
+        int gap = 8;
+        int buttonWidth = (innerRight - innerLeft - gap) / 2;
+        addButton(innerLeft, y, buttonWidth, 20, Text.literal("Paint Now").formatted(Formatting.GREEN),
+                "Choose an imported PNG and start the selected painting type.", this::openImagePicker);
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), button -> close())
-                .dimensions(right, y, buttonWidth, buttonHeight)
-                .tooltip(Tooltip.of(Text.literal("Close this client-only control screen.")))
+                .dimensions(innerLeft + buttonWidth + gap, y, buttonWidth, 20)
+                .tooltip(Tooltip.of(Text.literal("Close this client-only screen.")))
                 .build());
+        panelBottom = y + 26;
     }
 
-    private int addSection(String label, int y) {
-        sectionLabels.add(new SectionLabel(label, y));
-        return y + 14;
+    private void addModeButtons(int left, int right, int y) {
+        int gap = 4;
+        int buttonWidth = (right - left - gap * 2) / 3;
+        PaintingMode selected = configManager.config().paintingMode();
+        PaintingMode[] modes = {PaintingMode.MANUAL, PaintingMode.AUTO, PaintingMode.SMART};
+        for (int i = 0; i < modes.length; i++) {
+            PaintingMode mode = modes[i];
+            int x = left + i * (buttonWidth + gap);
+            boolean active = selected == mode;
+            Text label = Text.literal(mode.commandName().toUpperCase())
+                    .formatted(active ? Formatting.GREEN : Formatting.GRAY);
+            if (active) {
+                glows.add(new Rectangle(x - 1, y - 1, x + buttonWidth + 1, y + 21));
+            }
+            addButton(x, y, buttonWidth, 20, label,
+                    "Use " + mode.commandName() + " painting.",
+                    () -> runAndRefresh("#painting set " + mode.commandName()));
+        }
     }
 
-    private void addButton(int x, int y, int width, int height, String label, String tooltip, String command) {
-        addButton(x, y, width, height, Text.literal(label), tooltip, () -> run(command));
+    private int addSpeedRow(int left, int right, int y) {
+        addRowFrame(left, right, y, "Painting Tick Speed");
+        int controlWidth = 30;
+        int valueWidth = 52;
+        int controlsLeft = right - controlWidth * 2 - valueWidth - 4;
+        addButton(controlsLeft, y + 1, controlWidth, 18, "−", "Decrease delay by one tick.",
+                () -> changeSpeed(-1));
+        ButtonWidget value = ButtonWidget.builder(
+                        Text.literal(Integer.toString(autoPainter.delayTicks())).formatted(Formatting.YELLOW),
+                        button -> { })
+                .dimensions(controlsLeft + controlWidth + 2, y + 1, valueWidth, 18)
+                .tooltip(Tooltip.of(Text.literal("Current delay in ticks between painted pixels.")))
+                .build();
+        value.active = false;
+        addDrawableChild(value);
+        addButton(controlsLeft + controlWidth + valueWidth + 4, y + 1, controlWidth, 18, "+",
+                "Increase delay by one tick.", () -> changeSpeed(1));
+        return y + 22;
+    }
+
+    private int addToggleRow(String label, boolean enabled, int left, int right, int y,
+                             String tooltip, String command) {
+        addRowFrame(left, right, y, label);
+        int buttonWidth = 94;
+        int x = right - buttonWidth;
+        if (enabled) {
+            glows.add(new Rectangle(x - 1, y, right + 1, y + 20));
+        }
+        Text state = Text.literal(enabled ? "ON" : "OFF")
+                .formatted(enabled ? Formatting.GREEN : Formatting.RED);
+        addButton(x, y + 1, buttonWidth, 18, state, tooltip, () -> runAndRefresh(command));
+        return y + 22;
+    }
+
+    private int addRenameRow(int left, int right, int y, boolean recorded) {
+        addRowFrame(left, right, y, "Painting Rename");
+        int buttonWidth = 158;
+        int x = right - buttonWidth;
+        Text status = Text.literal((recorded ? "Recorded" : "Not recorded") + " · Record New")
+                .formatted(recorded ? Formatting.GREEN : Formatting.RED);
+        if (recorded) {
+            glows.add(new Rectangle(x - 1, y, right + 1, y + 20));
+        }
+        addButton(x, y + 1, buttonWidth, 18, status,
+                "Arm rename click recording, close this screen, then click the target in the ArtMap save GUI.",
+                () -> {
+                    run("#painting rename click");
+                    close();
+                });
+        return y + 22;
+    }
+
+    private void addRowFrame(int left, int right, int y, String label) {
+        rowBackgrounds.add(new Rectangle(left, y, right, y + 20));
+        labels.add(new Label(label, left + 6, y + 6, 0xEEEEEE));
+    }
+
+    private void changeSpeed(int delta) {
+        int minimum = configManager.config().autoPaintMinDelayTicks();
+        long candidate = (long) autoPainter.delayTicks() + delta;
+        int next = (int) Math.max(minimum, Math.min(Integer.MAX_VALUE, candidate));
+        run("#painting auto speed " + next);
+        refreshNextRender();
+    }
+
+    private void openImagePicker() {
+        MinecraftClient.getInstance().setScreen(new PaintingImagePickerScreen(
+                commandHandler, autoPainter, configManager, batchManager, this));
+    }
+
+    private void addButton(int x, int y, int width, int height, String label, String tooltip, Runnable action) {
+        addButton(x, y, width, height, Text.literal(label), tooltip, action);
     }
 
     private void addButton(int x, int y, int width, int height, Text label, String tooltip, Runnable action) {
-        addDrawableChild(ButtonWidget.builder(label, button -> {
-                    action.run();
-                    refreshNextRender();
-                })
+        addDrawableChild(ButtonWidget.builder(label, button -> action.run())
                 .dimensions(x, y, width, height)
                 .tooltip(Tooltip.of(Text.literal(tooltip)))
                 .build());
     }
 
-    private void startCalibrationFromGui(String calibrationName) {
-        if (calibrationManager.savedExactCompleteForLast(configManager.config())) {
-            confirmCalibrationRestart = true;
-            refreshNextRender();
-            return;
-        }
-        run("#painting calibrate start " + calibrationName);
+    private void runAndRefresh(String command) {
+        run(command);
+        refreshNextRender();
     }
 
     private void refreshNextRender() {
@@ -160,46 +212,7 @@ public final class PaintingControlScreen extends Screen {
     }
 
     private SessionController.MessageSink sink() {
-        return new SessionController.MessageSink() {
-            @Override
-            public void info(String message) {
-                sendInfo(Text.literal(message));
-            }
-
-            @Override
-            public void error(String message) {
-                sendError(Text.literal(message));
-            }
-
-            @Override
-            public void info(Text message) {
-                sendInfo(message);
-            }
-
-            @Override
-            public void error(Text message) {
-                sendError(message);
-            }
-
-            private void sendInfo(Text message) {
-                send(prefix().append(message.copy().formatted(Formatting.YELLOW)));
-            }
-
-            private void sendError(Text message) {
-                send(prefix().append(message.copy().formatted(Formatting.RED)));
-            }
-
-            private MutableText prefix() {
-                return Text.literal("[ArtMap] ").formatted(Formatting.GOLD);
-            }
-
-            private void send(MutableText message) {
-                MinecraftClient client = MinecraftClient.getInstance();
-                if (client.player != null) {
-                    client.player.sendMessage(message, false);
-                }
-            }
-        };
+        return PaintingScreenMessages.chatSink();
     }
 
     @Override
@@ -207,28 +220,17 @@ public final class PaintingControlScreen extends Screen {
         if (needsRefresh) {
             refreshNow();
         }
-        context.fill(0, 0, width, height, 0x08000000);
-        context.fill(width / 2 - 180, 8, width / 2 + 180, 34, 0x66000000);
-        context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 12, 0xFFFF55);
-        String calibrationName = calibrationManager.lastCalibrationName();
-        String autoState = autoPainter.running() ? (autoPainter.paused() ? "paused" : "running") : "stopped";
-        String status = "auto=" + autoState
-                + " phase=" + autoPainter.phase()
-                + " drag=" + (autoPainter.dragEnabled() ? "ON" : "OFF")
-                + " cal=" + calibrationName
-                + " " + batchManager.statusLine()
-                + " saved=" + calibrationManager.savedExactCountForLast(configManager.config()) + "/"
-                + (configManager.config().canvasWidth() * configManager.config().canvasHeight());
-        context.drawCenteredTextWithShadow(textRenderer, status, width / 2, 24, 0xDDDDDD);
-        if (confirmCalibrationRestart) {
-            context.fill(width / 2 - 180, 54, width / 2 + 180, 68, 0x66000000);
-            context.drawCenteredTextWithShadow(textRenderer,
-                    "Calibration \"" + calibrationName + "\" is already complete. Restart it?",
-                    width / 2, 58, 0xFF5555);
+        context.fill(0, 0, width, height, SCREEN_DIM);
+        context.fill(panelLeft, 4, panelRight, panelBottom, PANEL_BACKGROUND);
+        context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 11, 0xFFFF55);
+        for (Rectangle row : rowBackgrounds) {
+            context.fill(row.left(), row.top(), row.right(), row.bottom(), ROW_BACKGROUND);
         }
-        for (SectionLabel section : sectionLabels) {
-            context.fill(width / 2 - 160, section.y() - 2, width / 2 - 10, section.y() + 11, 0x55000000);
-            context.drawTextWithShadow(textRenderer, section.label(), width / 2 - 156, section.y(), 0xFFFF55);
+        for (Rectangle glow : glows) {
+            context.fill(glow.left(), glow.top(), glow.right(), glow.bottom(), ACTIVE_GLOW);
+        }
+        for (Label label : labels) {
+            context.drawTextWithShadow(textRenderer, label.text(), label.x(), label.y(), label.color());
         }
         super.render(context, mouseX, mouseY, delta);
     }
@@ -241,6 +243,9 @@ public final class PaintingControlScreen extends Screen {
     public void blur() {
     }
 
-    private record SectionLabel(String label, int y) {
+    private record Label(String text, int x, int y, int color) {
+    }
+
+    private record Rectangle(int left, int top, int right, int bottom) {
     }
 }

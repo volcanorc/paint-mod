@@ -26,8 +26,8 @@ public abstract class ChatScreenMixin {
     protected TextFieldWidget chatField;
 
     @Inject(method = "sendMessage(Ljava/lang/String;Z)V", at = @At("HEAD"), cancellable = true)
-    private void artmapColorAssistant$cancelPaintingCommand(String message, boolean addToHistory, CallbackInfo ci) {
-        if (ArtMapColorAssistantClient.handleLocalPaintingCommand(message)) {
+    private void artmapColorAssistant$cancelHashMessage(String message, boolean addToHistory, CallbackInfo ci) {
+        if (ArtMapColorAssistantClient.handleLocalHashMessage(message)) {
             ci.cancel();
         }
     }
@@ -55,17 +55,37 @@ public abstract class ChatScreenMixin {
         MinecraftClient client = MinecraftClient.getInstance();
         TextRenderer textRenderer = client.textRenderer;
         int visible = Math.min(8, suggestions.size());
-        int panelWidth = 330;
         int lineHeight = 11;
         int panelHeight = visible * lineHeight + 8;
-        int x = 4;
-        int y = Math.max(4, client.getWindow().getScaledHeight() - 46 - panelHeight);
-        context.fill(x, y, x + panelWidth, y + panelHeight, 0x99000000);
+        int commandWidth = 0;
+        int descriptionWidth = 0;
         for (int i = 0; i < visible; i++) {
             CommandGuide.Entry entry = suggestions.get(i);
-            int lineY = y + 4 + i * lineHeight;
-            context.drawTextWithShadow(textRenderer, entry.command(), x + 6, lineY, Formatting.YELLOW.getColorValue());
-            context.drawTextWithShadow(textRenderer, entry.description(), x + 146, lineY, 0xDDDDDD);
+            commandWidth = Math.max(commandWidth, textRenderer.getWidth(entry.command()));
+            descriptionWidth = Math.max(descriptionWidth, textRenderer.getWidth(entry.description()));
+        }
+        int panelWidth = Math.min(client.getWindow().getScaledWidth() - 8,
+                Math.max(180, commandWidth + descriptionWidth + 26));
+        int x = 4;
+        int y = Math.max(4, client.getWindow().getScaledHeight() - 46 - panelHeight);
+        context.getMatrices().push();
+        context.getMatrices().translate(0.0F, 0.0F, 400.0F);
+        try {
+            context.fill(x, y, x + panelWidth, y + panelHeight, 0x4D000000);
+            int descriptionX = x + 10 + commandWidth;
+            int descriptionAvailable = Math.max(0, x + panelWidth - descriptionX - 6);
+            for (int i = 0; i < visible; i++) {
+                CommandGuide.Entry entry = suggestions.get(i);
+                int lineY = y + 4 + i * lineHeight;
+                context.drawTextWithShadow(textRenderer, entry.command(), x + 6, lineY,
+                        Formatting.YELLOW.getColorValue());
+                if (descriptionAvailable > 24) {
+                    String description = textRenderer.trimToWidth(entry.description(), descriptionAvailable);
+                    context.drawTextWithShadow(textRenderer, description, descriptionX, lineY, 0xEEEEEE);
+                }
+            }
+        } finally {
+            context.getMatrices().pop();
         }
     }
 
