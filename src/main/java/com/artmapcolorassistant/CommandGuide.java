@@ -17,7 +17,8 @@ public final class CommandGuide {
             new Entry("batch", "Paint numbered image queue."),
             new Entry("postpaint", "Post-paint save/vault setup."),
             new Entry("rename", "Record save GUI click."),
-            new Entry("pv2", "Legacy vault click point controls."),
+            new Entry("pv <1-40>", "Choose the finished-canvas Player Vault."),
+            new Entry("pv2", "Select Player Vault 2; click/clear are legacy."),
             new Entry("full", "Start full auto."),
             new Entry("auto", "Auto painting controls."),
             new Entry("smart", "Smart hybrid painting controls."),
@@ -82,6 +83,9 @@ public final class CommandGuide {
             new Entry("click", "Legacy only; automatic slot transfer is default."),
             new Entry("clear", "Clear legacy vault click point.")
     );
+    private static final List<Entry> PV = List.of(
+            new Entry("<1-40>", "Save finished canvases in this Player Vault.")
+    );
     private static final List<Entry> ANDROID = List.of(
             new Entry("status", "Show Android/Pojav paths and runtime."),
             new Entry("testinput", "Check cursor/touch capture.")
@@ -141,8 +145,11 @@ public final class CommandGuide {
         if (lower.startsWith("rename")) {
             return RENAME;
         }
-        if (lower.startsWith("pv2")) {
+        if (lower.equals("pv2") || lower.startsWith("pv2 ")) {
             return PV2;
+        }
+        if (lower.equals("pv") || lower.startsWith("pv ")) {
+            return PV;
         }
         if (lower.startsWith("android")) {
             return ANDROID;
@@ -199,8 +206,11 @@ public final class CommandGuide {
         if (normalized.startsWith("rename")) {
             return prefixed("#painting rename ", RENAME, normalized.substring("rename".length()).trim());
         }
-        if (normalized.startsWith("pv2")) {
+        if (normalized.equals("pv2") || normalized.startsWith("pv2 ")) {
             return prefixed("#painting pv2 ", PV2, normalized.substring("pv2".length()).trim());
+        }
+        if (normalized.equals("pv") || normalized.startsWith("pv ")) {
+            return prefixed("#painting pv ", PV, normalized.substring("pv".length()).trim());
         }
         if (normalized.startsWith("android")) {
             return prefixed("#painting android ", ANDROID, normalized.substring("android".length()).trim());

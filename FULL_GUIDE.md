@@ -45,14 +45,14 @@ You need:
 - Fabric Loader
 - Fabric API
 - Java 21
-- `artmap-color-assistant-1.0.0.jar`
+- An ArtMapColorAssistant release JAR
 
 Install it:
 
-1. Download the JAR from the [v1.0.0 GitHub release](https://github.com/volcanorc/paint-mod/releases/tag/v1.0.0).
+1. Download the JAR from the [latest published GitHub release](https://github.com/volcanorc/paint-mod/releases/latest).
 2. Install Fabric Loader for Minecraft 1.21.1.
 3. Put Fabric API in the Minecraft `mods` folder.
-4. Put `artmap-color-assistant-1.0.0.jar` in the same `mods` folder.
+4. Put the downloaded `artmap-color-assistant-*.jar` in the same `mods` folder.
 5. Start the Fabric profile.
 6. Run `#painting paths` in Minecraft chat to see the folders used by the current launcher.
 
@@ -131,6 +131,7 @@ The dashboard provides:
 - Smart Basecoat toggle.
 - Painting Bucket toggle.
 - Post-paint automation toggle.
+- Read-only **Storage Used** status showing the selected `Player Vault N`.
 - Rename-point status and **Record New** action.
 - **Paint Now**, which opens the imported-image list.
 
@@ -280,7 +281,11 @@ Record the save-GUI point:
 
 The recorded point is saved in `.minecraft/config/artmap_color_assistant.json`.
 
-`#painting pv2 click` and `#painting pv2 clear` are legacy controls. Normal post-paint storage now uses automatic slot-based transfer.
+Finished canvases are stored in Player Vault 2 by default using `/pv 2`. Choose another vault from 1 through 40 with `#painting pv 3` or the compact form `#painting pv3`. The setting is saved in `.minecraft/config/artmap_color_assistant.json` and stays selected after Minecraft or the computer restarts. The dashboard shows the current vault in its **Storage Used** row.
+
+The storage sequence stays guarded: finish canvas, rename it, open the selected `/pv N`, wait for the Player Vault screen, then quick-move the finished canvas. If the screen does not open or the item remains in the hotbar, the workflow stops and asks you to store it manually.
+
+`#painting pv2` selects Player Vault 2. `#painting pv2 click` and `#painting pv2 clear` are separate legacy click-recorder controls; normal Player Vault transfer is automatic and does not need that recorded point.
 
 ## Complete Command List
 
@@ -366,8 +371,14 @@ Default bucket delays are 10, 20, 16, 24, and 10 ticks in that order.
 - `#painting postpaint status` — Show slots, vault command, transfer mode, and recorded-point state.
 - `#painting rename click` — Arm recording for the ArtMap save/done GUI point.
 - `#painting rename clear` — Delete the recorded rename point.
+- `#painting pv <1-40>` — Permanently choose where finished canvases are stored, for example `#painting pv 20`.
+- `#painting pv1` through `#painting pv40` — Compact form of the same storage command, for example `#painting pv20`.
+- `#painting pv` — Incomplete by itself; the mod shows the accepted forms and valid 1-40 range without changing the saved vault.
+- `#painting pv2` — Select Player Vault 2. With no extra word, this is a storage selection command.
 - `#painting pv2 click` — Arm the legacy `/pv 2` click recorder.
-- `#painting pv2 clear` — Delete the legacy PV2 point.
+- `#painting pv2 clear` — Delete the legacy Player Vault 2 click point.
+
+Invalid vault values such as `0`, `41`, negative numbers, or words never replace the current saved selection.
 
 ### Four-Corner Calibration Commands
 

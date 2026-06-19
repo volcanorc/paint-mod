@@ -149,12 +149,15 @@ public final class HashCommandHandler {
             case "batch" -> handleBatch(parts, sink);
             case "postpaint" -> handlePostPaint(parts, sink);
             case "rename" -> handleRename(parts, sink);
+            case "pv" -> handlePlayerVault(parts, sink);
             case "pv2" -> handlePv2(parts, sink);
             case "cal" -> handleCalibration(parts, sink);
             case "calibrate" -> handleExactCalibration(parts, sink);
             case "usecalibration" -> handleUseCalibration(parts, sink);
             default -> {
-                if (parts.length == 1 && command.endsWith(".png")) {
+                if (PlayerVaultSelection.looksCompact(command)) {
+                    handleCompactPlayerVault(command, parts, sink);
+                } else if (parts.length == 1 && command.endsWith(".png")) {
                     startImage(parts[0], sink);
                 } else {
                     usage(sink);
@@ -248,18 +251,62 @@ public final class HashCommandHandler {
     }
 
     private void handlePv2(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length == 1) {
+            applyPlayerVault(new PlayerVaultSelection(2), sink);
+            return;
+        }
         if (parts.length != 2) {
-            sink.error("Usage: #painting pv2 click|clear (legacy only; PV2 transfer is automatic now)");
+            sink.error("Usage: #painting pv2 click|clear (legacy Player Vault 2 recorder only; normal transfer is automatic)");
             return;
         }
         switch (parts[1].toLowerCase()) {
             case "click" -> {
                 guiClickRecorder.armPv2(sink);
-                sink.info("PV2 click recording is legacy only. Normal post-paint now transfers hotbar slot 1 automatically.");
+                sink.info("Player Vault 2 click recording is legacy only. Normal post-paint transfers hotbar slot 1 automatically.");
             }
             case "clear" -> guiClickRecorder.clearPv2(sink);
-            default -> sink.error("Usage: #painting pv2 click|clear (legacy only; PV2 transfer is automatic now)");
+            default -> sink.error("Usage: #painting pv2 click|clear (legacy Player Vault 2 recorder only; normal transfer is automatic)");
         }
+    }
+
+    private void handlePlayerVault(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 2) {
+            playerVaultUsage(sink);
+            return;
+        }
+        PlayerVaultSelection.ParseResult result = PlayerVaultSelection.parseNumber(parts[1]);
+        if (!result.valid()) {
+            sink.error(result.error());
+            playerVaultUsage(sink);
+            return;
+        }
+        applyPlayerVault(result.selection(), sink);
+    }
+
+    private void handleCompactPlayerVault(String command, String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 1) {
+            playerVaultUsage(sink);
+            return;
+        }
+        PlayerVaultSelection.ParseResult result = PlayerVaultSelection.parseCompact(command);
+        if (!result.valid()) {
+            sink.error(result.error());
+            playerVaultUsage(sink);
+            return;
+        }
+        applyPlayerVault(result.selection(), sink);
+    }
+
+    private void applyPlayerVault(PlayerVaultSelection selection, SessionController.MessageSink sink) {
+        if (configManager.setPostPaintVault(selection, text -> sink.error(text.getString()))) {
+            sink.info("Finished-canvas storage changed to " + selection.displayName() + " (" + selection.command()
+                    + "). This setting is saved and will remain after restarting Minecraft.");
+        }
+    }
+
+    private void playerVaultUsage(SessionController.MessageSink sink) {
+        sink.error("Incorrect Player Vault command. To change finished-canvas storage, use #painting pv <1-40> "
+                + "(example: #painting pv 3). Compact commands such as #painting pv3 also work.");
     }
 
     private void postPaintStatus(SessionController.MessageSink sink) {
@@ -269,9 +316,10 @@ public final class HashCommandHandler {
                 + " finishedSlot=" + (config.postPaintFinishedHotbarSlot() + 1)
                 + " blankSlot=" + (config.postPaintBlankCanvasHotbarSlot() + 1)
                 + " aimIndex=" + config.postPaintAimCalibrationIndex()
+                + " storage=\"" + PlayerVaultSelection.displayName(config.postPaintVaultCommand()) + "\""
                 + " vaultCommand=\"" + config.postPaintVaultCommand() + "\""
                 + " renamePoint=" + clickPointStatus(config.postPaintRenameClickPoint())
-                + " pv2Transfer=automatic-slot-based"
+                + " playerVaultTransfer=automatic-slot-based"
                 + " " + batchManager.statusLine() + ".");
     }
 
@@ -298,7 +346,8 @@ public final class HashCommandHandler {
                 sink.info(calibrationReadiness(config));
                 sink.info(readiness("postpaint on", config.postPaintAutomationEnabled()));
                 sink.info(readiness("recorded rename click", config.postPaintRenameClickPoint() != null));
-                sink.info(readiness("pv2 transfer automatic slot-based", true));
+                sink.info(readiness("storage " + PlayerVaultSelection.displayName(config.postPaintVaultCommand()), true));
+                sink.info(readiness("player vault transfer automatic slot-based", true));
                 sink.info(readiness("images in folder - " + imageCount(), imageCount() > 0));
                 sink.info(readiness("smart off", !config.smartEnabled()));
                 sink.info(readiness("bucket off", !config.bucketEnabled()));
@@ -315,7 +364,8 @@ public final class HashCommandHandler {
                 sink.info(calibrationReadiness(config));
                 sink.info(readiness("postpaint on", config.postPaintAutomationEnabled()));
                 sink.info(readiness("recorded rename click", config.postPaintRenameClickPoint() != null));
-                sink.info(readiness("pv2 transfer automatic slot-based", true));
+                sink.info(readiness("storage " + PlayerVaultSelection.displayName(config.postPaintVaultCommand()), true));
+                sink.info(readiness("player vault transfer automatic slot-based", true));
                 sink.info(readiness("images in folder - " + imageCount(), imageCount() > 0));
                 sink.info(batchManager.statusLine());
                 sink.info(smartPainter.status(config));
@@ -900,7 +950,7 @@ public final class HashCommandHandler {
     }
 
     private void usage(SessionController.MessageSink sink) {
-        sink.info("Usage: #painting help, gui, <file.png>, dryrun, palette ..., batch ..., postpaint ..., rename ..., pv2 ..., auto full, stop, pause, resume, back, skip, goto, calibrate ..., usecalibration <name>, cal ...");
+        sink.info("Usage: #painting help, gui, <file.png>, dryrun, palette ..., batch ..., postpaint ..., rename ..., pv <1-40>, pv2 ..., auto full, stop, pause, resume, back, skip, goto, calibrate ..., usecalibration <name>, cal ...");
     }
 
     private void openGui(SessionController.MessageSink sink) {

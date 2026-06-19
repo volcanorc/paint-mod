@@ -15,7 +15,7 @@ The mod performs normal Minecraft client actions. It does not modify the server 
 
 ## Installation
 
-1. Download `artmap-color-assistant-1.0.0.jar` from the [v1.0.0 release](https://github.com/volcanorc/paint-mod/releases/tag/v1.0.0).
+1. Download the ArtMapColorAssistant JAR from the [latest published release](https://github.com/volcanorc/paint-mod/releases/latest).
 2. Install Fabric Loader for Minecraft 1.21.1.
 3. Put Fabric API and the ArtMapColorAssistant JAR in your Minecraft `mods` folder.
 4. Start Minecraft with the Fabric profile.
@@ -103,10 +103,13 @@ Use a speed allowed by your server rules and connection quality.
 | `#painting status` | Show the current session and painting state. |
 | `#painting stop` | Stop the current painting session and automation. |
 | `#painting batch start 1 10 Dragon` | Paint numbered files `1.png` through `10.png`. |
+| `#painting pv 3` | Permanently store finished canvases in Player Vault 3 (valid range: 1-40). |
 | `#painting help` | Show clickable command help inside Minecraft. |
 
 `#paint` is a shorter alias for `#painting`.
 All messages beginning with `#` are kept client-side. Invalid hash commands are blocked instead of being sent to server chat.
+
+Finished canvases use Player Vault 2 by default (`/pv 2`). Change it with either `#painting pv 3` or the compact form `#painting pv3`; the choice is saved in the mod config and remains after restarting Minecraft.
 
 ## Calibration
 
@@ -147,4 +150,4 @@ gradle test
 gradle build
 ```
 
-The built mod is written to `build/libs/artmap-color-assistant-1.0.0.jar`.
+The current source build is written to `build/libs/artmap-color-assistant-1.0.1.jar`.

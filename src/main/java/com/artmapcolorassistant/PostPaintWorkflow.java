@@ -23,7 +23,7 @@ public final class PostPaintWorkflow {
     private static final int SCREEN_TIMEOUT_TICKS = 120;
     private static final int ITEM_TIMEOUT_TICKS = 120;
     private static final int SHORT_WAIT_TICKS = 8;
-    private static final int PV2_SLOT_ACTION_DELAY_TICKS = 20;
+    private static final int PLAYER_VAULT_SLOT_ACTION_DELAY_TICKS = 20;
 
     private final MinecraftClient client;
     private final CalibrationManager calibrationManager;
@@ -38,7 +38,7 @@ public final class PostPaintWorkflow {
     private int funJumpPressTicksRemaining;
     private int funJumpGapTicksRemaining;
     private boolean funJumpKeyHeld;
-    private ItemStack pendingPv2TransferStack = ItemStack.EMPTY;
+    private ItemStack pendingVaultTransferStack = ItemStack.EMPTY;
     private Phase phase = Phase.IDLE;
 
     public PostPaintWorkflow(MinecraftClient client, CalibrationManager calibrationManager) {
@@ -69,7 +69,7 @@ public final class PostPaintWorkflow {
         this.funJumpPressTicksRemaining = 0;
         this.funJumpGapTicksRemaining = 0;
         this.funJumpKeyHeld = false;
-        this.pendingPv2TransferStack = ItemStack.EMPTY;
+        this.pendingVaultTransferStack = ItemStack.EMPTY;
         this.phase = Phase.SELECT_SAVE_ITEM;
         sink.info("Post-paint automation started for save name \"" + saveName() + "\".");
     }
@@ -84,7 +84,7 @@ public final class PostPaintWorkflow {
         funJumpsRemaining = 0;
         funJumpPressTicksRemaining = 0;
         funJumpGapTicksRemaining = 0;
-        pendingPv2TransferStack = ItemStack.EMPTY;
+        pendingVaultTransferStack = ItemStack.EMPTY;
         phase = Phase.IDLE;
     }
 
@@ -105,11 +105,11 @@ public final class PostPaintWorkflow {
             case TYPE_RENAME -> typeRename(config, sink);
             case CLICK_RENAME_POINT -> clickRenamePoint(config, sink);
             case WAIT_FINISHED_ITEM -> waitFinishedItem(config, sink);
-            case OPEN_PV2 -> openPv2(config, sink);
-            case WAIT_PV2_SCREEN -> waitPv2Screen(sink);
+            case OPEN_PLAYER_VAULT -> openPlayerVault(config, sink);
+            case WAIT_PLAYER_VAULT_SCREEN -> waitPlayerVaultScreen(config, sink);
             case QUICK_MOVE_FINISHED_ITEM -> quickMoveFinishedItem(config, sink);
             case WAIT_FINISHED_ITEM_REMOVED -> waitFinishedItemRemoved(config, sink);
-            case CLOSE_PV2 -> closePv2(sink);
+            case CLOSE_PLAYER_VAULT -> closePlayerVault(sink);
             case SELECT_BLANK_CANVAS -> selectBlankCanvas(config, sink);
             case PLACE_BLANK_CANVAS -> placeBlankCanvas(config, sink);
             case FUN_JUMP_START -> startFunJumps(config);
@@ -293,7 +293,7 @@ public final class PostPaintWorkflow {
 
     private void waitFinishedItem(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (hotbarNonEmpty(config.postPaintFinishedHotbarSlot())) {
-            phase = Phase.OPEN_PV2;
+            phase = Phase.OPEN_PLAYER_VAULT;
             waitTicks = SHORT_WAIT_TICKS;
             return;
         }
@@ -302,7 +302,7 @@ public final class PostPaintWorkflow {
         }
     }
 
-    private void openPv2(ConfigManager.Config config, SessionController.MessageSink sink) {
+    private void openPlayerVault(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (!hasPlayer(sink)) {
             fail();
             return;
@@ -320,58 +320,64 @@ public final class PostPaintWorkflow {
         }
         client.player.networkHandler.sendChatCommand(command);
         timeoutTicks = SCREEN_TIMEOUT_TICKS;
-        phase = Phase.WAIT_PV2_SCREEN;
+        phase = Phase.WAIT_PLAYER_VAULT_SCREEN;
     }
 
-    private void waitPv2Screen(SessionController.MessageSink sink) {
+    private void waitPlayerVaultScreen(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (client.currentScreen instanceof HandledScreen<?>) {
             phase = Phase.QUICK_MOVE_FINISHED_ITEM;
-            waitTicks = PV2_SLOT_ACTION_DELAY_TICKS;
+            waitTicks = PLAYER_VAULT_SLOT_ACTION_DELAY_TICKS;
             return;
         }
         if (--timeoutTicks <= 0) {
-            fail(sink, "/pv 2 did not open a handled vault screen. Store the canvas manually.");
+            fail(sink, config.postPaintVaultCommand() + " did not open "
+                    + PlayerVaultSelection.displayName(config.postPaintVaultCommand())
+                    + ". Store the canvas manually.");
         }
     }
 
     private void quickMoveFinishedItem(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (!(client.currentScreen instanceof HandledScreen<?>) || client.interactionManager == null || client.player == null) {
-            fail(sink, "PV2 vault screen is not open for automatic slot transfer.");
+            fail(sink, PlayerVaultSelection.displayName(config.postPaintVaultCommand())
+                    + " is not open for automatic slot transfer.");
             return;
         }
         ItemStack sourceStack = hotbarStack(config.postPaintFinishedHotbarSlot());
         if (sourceStack.isEmpty()) {
-            fail(sink, "Finished canvas is missing from hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1) + " before PV2 transfer.");
+            fail(sink, "Finished canvas is missing from hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1)
+                    + " before Player Vault transfer.");
             return;
         }
         Slot slot = playerHotbarScreenSlot(config.postPaintFinishedHotbarSlot());
         if (slot == null) {
             fail(sink, "Could not find hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1)
-                    + " in the open PV2 screen handler.");
+                    + " in the open Player Vault screen handler.");
             return;
         }
-        pendingPv2TransferStack = sourceStack.copy();
+        pendingVaultTransferStack = sourceStack.copy();
         client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, slot.id, 0, SlotActionType.QUICK_MOVE, client.player);
-        waitTicks = PV2_SLOT_ACTION_DELAY_TICKS;
+        waitTicks = PLAYER_VAULT_SLOT_ACTION_DELAY_TICKS;
         timeoutTicks = 1;
         phase = Phase.WAIT_FINISHED_ITEM_REMOVED;
     }
 
     private void waitFinishedItemRemoved(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (!hotbarNonEmpty(config.postPaintFinishedHotbarSlot())) {
-            pendingPv2TransferStack = ItemStack.EMPTY;
-            phase = Phase.CLOSE_PV2;
+            pendingVaultTransferStack = ItemStack.EMPTY;
+            phase = Phase.CLOSE_PLAYER_VAULT;
             return;
         }
         if (--timeoutTicks <= 0) {
-            String itemName = pendingPv2TransferStack.isEmpty() ? "item" : pendingPv2TransferStack.getName().getString();
+            String itemName = pendingVaultTransferStack.isEmpty() ? "item" : pendingVaultTransferStack.getName().getString();
             fail(sink, "Finished canvas stayed in hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1)
-                    + " after automatic PV2 transfer. PV2 may be full. Store \"" + itemName
+                    + " after automatic Player Vault transfer. "
+                    + PlayerVaultSelection.displayName(config.postPaintVaultCommand())
+                    + " may be full. Store \"" + itemName
                     + "\" manually, then continue the batch.");
         }
     }
 
-    private void closePv2(SessionController.MessageSink sink) {
+    private void closePlayerVault(SessionController.MessageSink sink) {
         if (client.player != null) {
             client.player.closeHandledScreen();
         }
@@ -558,11 +564,11 @@ public final class PostPaintWorkflow {
         TYPE_RENAME,
         CLICK_RENAME_POINT,
         WAIT_FINISHED_ITEM,
-        OPEN_PV2,
-        WAIT_PV2_SCREEN,
+        OPEN_PLAYER_VAULT,
+        WAIT_PLAYER_VAULT_SCREEN,
         QUICK_MOVE_FINISHED_ITEM,
         WAIT_FINISHED_ITEM_REMOVED,
-        CLOSE_PV2,
+        CLOSE_PLAYER_VAULT,
         SELECT_BLANK_CANVAS,
         PLACE_BLANK_CANVAS,
         FUN_JUMP_START,

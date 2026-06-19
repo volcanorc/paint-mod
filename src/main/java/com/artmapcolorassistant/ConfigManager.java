@@ -380,6 +380,22 @@ public final class ConfigManager {
         saveConfigChange("post-paint automation", warningSink);
     }
 
+    public boolean setPostPaintVault(PlayerVaultSelection selection, Consumer<Text> warningSink) {
+        if (selection == null) {
+            return false;
+        }
+        Config previous = config;
+        config = config.withPostPaintVaultCommand(selection.command());
+        try {
+            save();
+            return true;
+        } catch (IOException e) {
+            config = previous;
+            warn("Failed to save post-paint Player Vault: " + e.getMessage(), warningSink);
+            return false;
+        }
+    }
+
     public void setPortableExactCalibrationMode(boolean enabled, Consumer<Text> warningSink) {
         config = config.withPortableExactCalibrationMode(enabled);
         saveConfigChange("portable exact calibration mode", warningSink);
@@ -462,7 +478,7 @@ public final class ConfigManager {
 
     public void setPostPaintPv2ClickPoint(RecordedClickPoint point, Consumer<Text> warningSink) {
         config = config.withPostPaintPv2ClickPoint(point);
-        saveConfigChange("PV2 click point", warningSink);
+        saveConfigChange("legacy Player Vault 2 click point", warningSink);
     }
 
     private void saveConfigChange(String label, Consumer<Text> warningSink) {
@@ -738,6 +754,31 @@ public final class ConfigManager {
 
         public Config withPostPaintAutomationEnabled(boolean value) {
             return copy(value, postPaintRenameClickPoint, postPaintPv2ClickPoint);
+        }
+
+        public Config withPostPaintVaultCommand(String value) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, selectedCalibrationName,
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, batchEnableDrag, postPaintAutomationEnabled,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, value == null || value.isBlank() ? "/pv 2" : value.trim(),
+                    postPaintSaveSelectDelayTicks, postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks,
+                    postPaintRightClickRetries, postPaintFunJumpsEnabled, postPaintFunJumpCount,
+                    postPaintFunJumpPressTicks, postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
         }
 
         public Config withPortableExactCalibrationMode(boolean value) {

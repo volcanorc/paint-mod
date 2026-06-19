@@ -19,6 +19,9 @@ public final class PaintingControlScreen extends Screen {
     private static final int ACTIVE_GLOW = 0x3055FF55;
     private static final int ENABLED_COLOR = 0x55FF55;
     private static final int DISABLED_COLOR = 0xFF5555;
+    private static final int ROW_HEIGHT = 18;
+    private static final int ROW_STEP = 19;
+    private static final int CONTROL_HEIGHT = 16;
 
     private final HashCommandHandler commandHandler;
     private final AutoPainter autoPainter;
@@ -53,15 +56,15 @@ public final class PaintingControlScreen extends Screen {
         panelRight = panelLeft + panelWidth;
         int innerLeft = panelLeft + 10;
         int innerRight = panelRight - 10;
-        int y = 26;
+        int y = 22;
 
         labels.add(new Label("Painting Type", innerLeft, y, 0xFFFF55));
-        y += 12;
+        y += 10;
         addModeButtons(innerLeft, innerRight, y);
-        y += 22;
+        y += 20;
 
         labels.add(new Label("Features", innerLeft, y, 0xFFFF55));
-        y += 12;
+        y += 10;
         y = addSpeedRow(innerLeft, innerRight, y);
         y = addToggleRow("Painting Auto Drag", autoPainter.dragEnabled(), innerLeft, innerRight, y,
                 "Toggle same-color row dragging.",
@@ -77,18 +80,19 @@ public final class PaintingControlScreen extends Screen {
         y = addToggleRow("Painting Post-paint", config.postPaintAutomationEnabled(), innerLeft, innerRight, y,
                 "Toggle guarded save, vault, and next-canvas automation.",
                 "#painting postpaint " + (config.postPaintAutomationEnabled() ? "off" : "on"));
+        y = addStorageRow(innerLeft, innerRight, y, config.postPaintVaultCommand());
         y = addRenameRow(innerLeft, innerRight, y, config.postPaintRenameClickPoint() != null);
 
-        y += 4;
+        y += 3;
         int gap = 8;
         int buttonWidth = (innerRight - innerLeft - gap) / 2;
-        addButton(innerLeft, y, buttonWidth, 20, Text.literal("Paint Now").formatted(Formatting.GREEN),
+        addButton(innerLeft, y, buttonWidth, 18, Text.literal("Paint Now").formatted(Formatting.GREEN),
                 "Choose an imported PNG and start the selected painting type.", this::openImagePicker);
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), button -> close())
-                .dimensions(innerLeft + buttonWidth + gap, y, buttonWidth, 20)
+                .dimensions(innerLeft + buttonWidth + gap, y, buttonWidth, 18)
                 .tooltip(Tooltip.of(Text.literal("Close this client-only screen.")))
                 .build());
-        panelBottom = y + 26;
+        panelBottom = y + 24;
     }
 
     private void addModeButtons(int left, int right, int y) {
@@ -103,9 +107,9 @@ public final class PaintingControlScreen extends Screen {
             Text label = Text.literal(mode.commandName().toUpperCase())
                     .formatted(active ? Formatting.GREEN : Formatting.GRAY);
             if (active) {
-                glows.add(new Rectangle(x - 1, y - 1, x + buttonWidth + 1, y + 21));
+                glows.add(new Rectangle(x - 1, y - 1, x + buttonWidth + 1, y + 19));
             }
-            addButton(x, y, buttonWidth, 20, label,
+            addButton(x, y, buttonWidth, 18, label,
                     "Use " + mode.commandName() + " painting.",
                     () -> runAndRefresh("#painting set " + mode.commandName()));
         }
@@ -116,19 +120,19 @@ public final class PaintingControlScreen extends Screen {
         int controlWidth = 30;
         int valueWidth = 52;
         int controlsLeft = right - controlWidth * 2 - valueWidth - 4;
-        addButton(controlsLeft, y + 1, controlWidth, 18, "−", "Decrease delay by one tick.",
+        addButton(controlsLeft, y + 1, controlWidth, CONTROL_HEIGHT, "-", "Decrease delay by one tick.",
                 () -> changeSpeed(-1));
         ButtonWidget value = ButtonWidget.builder(
                         Text.literal(Integer.toString(autoPainter.delayTicks())).formatted(Formatting.YELLOW),
                         button -> { })
-                .dimensions(controlsLeft + controlWidth + 2, y + 1, valueWidth, 18)
+                .dimensions(controlsLeft + controlWidth + 2, y + 1, valueWidth, CONTROL_HEIGHT)
                 .tooltip(Tooltip.of(Text.literal("Current delay in ticks between painted pixels.")))
                 .build();
         value.active = false;
         addDrawableChild(value);
-        addButton(controlsLeft + controlWidth + valueWidth + 4, y + 1, controlWidth, 18, "+",
+        addButton(controlsLeft + controlWidth + valueWidth + 4, y + 1, controlWidth, CONTROL_HEIGHT, "+",
                 "Increase delay by one tick.", () -> changeSpeed(1));
-        return y + 22;
+        return y + ROW_STEP;
     }
 
     private int addToggleRow(String label, boolean enabled, int left, int right, int y,
@@ -137,35 +141,51 @@ public final class PaintingControlScreen extends Screen {
         int buttonWidth = 94;
         int x = right - buttonWidth;
         if (enabled) {
-            glows.add(new Rectangle(x - 1, y, right + 1, y + 20));
+            glows.add(new Rectangle(x - 1, y, right + 1, y + ROW_HEIGHT));
         }
         Text state = Text.literal(enabled ? "ON" : "OFF")
                 .formatted(enabled ? Formatting.GREEN : Formatting.RED);
-        addButton(x, y + 1, buttonWidth, 18, state, tooltip, () -> runAndRefresh(command));
-        return y + 22;
+        addButton(x, y + 1, buttonWidth, CONTROL_HEIGHT, state, tooltip, () -> runAndRefresh(command));
+        return y + ROW_STEP;
+    }
+
+    private int addStorageRow(int left, int right, int y, String configuredCommand) {
+        addRowFrame(left, right, y, "Storage Used");
+        PlayerVaultSelection selection = PlayerVaultSelection.fromStoredCommand(configuredCommand);
+        String displayName = selection == null ? "Custom storage" : selection.displayName();
+        String command = selection == null ? configuredCommand : selection.command();
+        int buttonWidth = 158;
+        ButtonWidget status = ButtonWidget.builder(
+                        Text.literal(displayName).formatted(Formatting.AQUA), button -> { })
+                .dimensions(right - buttonWidth, y + 1, buttonWidth, CONTROL_HEIGHT)
+                .tooltip(Tooltip.of(Text.literal("Change with #painting pv <1-40>. Current command: " + command)))
+                .build();
+        status.active = false;
+        addDrawableChild(status);
+        return y + ROW_STEP;
     }
 
     private int addRenameRow(int left, int right, int y, boolean recorded) {
         addRowFrame(left, right, y, "Painting Rename");
         int buttonWidth = 158;
         int x = right - buttonWidth;
-        Text status = Text.literal((recorded ? "Recorded" : "Not recorded") + " · Record New")
+        Text status = Text.literal((recorded ? "Recorded" : "Not recorded") + " - Record New")
                 .formatted(recorded ? Formatting.GREEN : Formatting.RED);
         if (recorded) {
-            glows.add(new Rectangle(x - 1, y, right + 1, y + 20));
+            glows.add(new Rectangle(x - 1, y, right + 1, y + ROW_HEIGHT));
         }
-        addButton(x, y + 1, buttonWidth, 18, status,
+        addButton(x, y + 1, buttonWidth, CONTROL_HEIGHT, status,
                 "Arm rename click recording, close this screen, then click the target in the ArtMap save GUI.",
                 () -> {
                     run("#painting rename click");
                     close();
                 });
-        return y + 22;
+        return y + ROW_STEP;
     }
 
     private void addRowFrame(int left, int right, int y, String label) {
-        rowBackgrounds.add(new Rectangle(left, y, right, y + 20));
-        labels.add(new Label(label, left + 6, y + 6, 0xEEEEEE));
+        rowBackgrounds.add(new Rectangle(left, y, right, y + ROW_HEIGHT));
+        labels.add(new Label(label, left + 6, y + 5, 0xEEEEEE));
     }
 
     private void changeSpeed(int delta) {

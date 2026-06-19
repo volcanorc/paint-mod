@@ -21,7 +21,7 @@ public final class GuiClickRecorder {
 
     public void armPv2(SessionController.MessageSink sink) {
         target = Target.PV2;
-        sink.info("Legacy PV2 click recording armed. Normal post-paint now transfers hotbar slot 1 automatically without this point.");
+        sink.info("Legacy Player Vault 2 click recording armed. Normal post-paint transfers hotbar slot 1 automatically without this point.");
     }
 
     public void clearRename(SessionController.MessageSink sink) {
@@ -31,7 +31,7 @@ public final class GuiClickRecorder {
 
     public void clearPv2(SessionController.MessageSink sink) {
         configManager.setPostPaintPv2ClickPoint(null, text -> sink.error(text.getString()));
-        sink.info("PV2 click point cleared.");
+        sink.info("Legacy Player Vault 2 click point cleared.");
     }
 
     public boolean armed() {
@@ -81,7 +81,7 @@ public final class GuiClickRecorder {
             sink.info("Recorded rename click point x=" + Math.round(scaledX) + " y=" + Math.round(scaledY) + " source=" + source + ".");
         } else {
             configManager.setPostPaintPv2ClickPoint(point, text -> sink.error(text.getString()));
-            sink.info("Recorded PV2 click point x=" + Math.round(scaledX) + " y=" + Math.round(scaledY) + " source=" + source + ".");
+            sink.info("Recorded legacy Player Vault 2 click point x=" + Math.round(scaledX) + " y=" + Math.round(scaledY) + " source=" + source + ".");
         }
         target = Target.NONE;
     }
