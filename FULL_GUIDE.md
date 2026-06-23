@@ -508,7 +508,9 @@ If post-paint automation failed, read its error, complete or repair the missing 
 - Use `#painting palette why <hex>` for a problem color.
 - Use `#painting palette reds` for red-heavy artwork.
 - Run `#painting dryrun <filename.png>` before painting.
-- Server ArtMap palettes can differ; update the configured colors or server override values when necessary.
+- The bundled palette uses measured ArtMap item colors, not generic Minecraft map colors.
+- Near-black pixels normally match Ink Sac. Charcoal is a separate reddish-black paint color, while Coal is kept as a darkening tool and is not used for normal image matching.
+- Server ArtMap palettes can still differ; update the configured colors or server override values when necessary.
 
 ### An invalid `#` message was blocked
 

@@ -22,6 +22,7 @@ import java.util.function.Consumer;
 
 public final class ConfigManager {
     public static final String MOD_ID = "artmap_color_assistant";
+    static final int CURRENT_ARTMAP_PALETTE_VERSION = 2;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private Config config = Config.defaults();
@@ -89,6 +90,9 @@ public final class ConfigManager {
 
     private Config parse(JsonObject root) {
         Config defaults = Config.defaults();
+        if (root == null) {
+            return defaults;
+        }
         int canvasWidth = intValue(root, "canvasWidth", defaults.canvasWidth);
         int canvasHeight = intValue(root, "canvasHeight", defaults.canvasHeight);
         int reservedHotbarSlot = clamp(intValue(root, "reservedHotbarSlot", defaults.reservedHotbarSlot), 0, 8);
@@ -198,6 +202,10 @@ public final class ConfigManager {
                 serverColorOverrides.add(override);
             }
         }
+        if (intValue(root, "artMapPaletteVersion", 0) < CURRENT_ARTMAP_PALETTE_VERSION) {
+            colors = applyMeasuredArtMapPalette(colors);
+            serverColorOverrides = mergeMeasuredServerColorOverrides(serverColorOverrides);
+        }
         OverrideResult overrideResult = applyServerColorOverrides(colors, serverColorOverridesEnabled, serverColorOverrides);
         serverColorOverridesApplied = overrideResult.applied();
         return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
@@ -265,8 +273,9 @@ public final class ConfigManager {
         return new ServerColorOverride(item, rgb);
     }
 
-    public JsonObject toJson(Config value) {
+    public static JsonObject toJson(Config value) {
         JsonObject root = new JsonObject();
+        root.addProperty("artMapPaletteVersion", CURRENT_ARTMAP_PALETTE_VERSION);
         root.addProperty("canvasWidth", value.canvasWidth);
         root.addProperty("canvasHeight", value.canvasHeight);
         root.addProperty("reservedHotbarSlot", value.reservedHotbarSlot);
@@ -614,10 +623,60 @@ public final class ConfigManager {
         return new OverrideResult(List.copyOf(effective), applied);
     }
 
+    static List<ArtMapColor> applyMeasuredArtMapPalette(List<ArtMapColor> baseColors) {
+        List<ArtMapColor> colors = new ArrayList<>(baseColors);
+        for (ServerColorOverride measured : measuredArtMapPalette()) {
+            int existingIndex = findColorIndex(colors, measured.item());
+            if (existingIndex >= 0) {
+                ArtMapColor existing = colors.get(existingIndex);
+                colors.set(existingIndex, new ArtMapColor(
+                        existing.name(),
+                        existing.bukkitMaterial(),
+                        existing.item(),
+                        existing.legacyItem(),
+                        measured.rgb(),
+                        existing.tool()
+                ));
+            } else {
+                colors.add(new ArtMapColor(
+                        readableName(measured.item()),
+                        bukkitMaterialName(measured.item()),
+                        measured.item(),
+                        null,
+                        measured.rgb(),
+                        false
+                ));
+            }
+        }
+        return List.copyOf(colors);
+    }
+
+    static List<ServerColorOverride> mergeMeasuredServerColorOverrides(List<ServerColorOverride> overrides) {
+        List<ServerColorOverride> merged = new ArrayList<>(overrides);
+        for (ServerColorOverride measured : measuredArtMapPalette()) {
+            int existingIndex = findOverrideIndex(merged, measured.item());
+            if (existingIndex >= 0) {
+                merged.set(existingIndex, measured);
+            } else {
+                merged.add(measured);
+            }
+        }
+        return List.copyOf(merged);
+    }
+
     private static int findColorIndex(List<ArtMapColor> colors, Identifier item) {
         for (int i = 0; i < colors.size(); i++) {
             ArtMapColor color = colors.get(i);
             if (color.item().equals(item)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int findOverrideIndex(List<ServerColorOverride> overrides, Identifier item) {
+        for (int i = 0; i < overrides.size(); i++) {
+            if (overrides.get(i).item().equals(item)) {
                 return i;
             }
         }
@@ -962,6 +1021,7 @@ public final class ConfigManager {
                         object.get("tool").getAsBoolean()
                 ));
             }
+            colors = applyMeasuredArtMapPalette(colors);
             List<ServerColorOverride> overrides = new ArrayList<>();
             for (JsonElement element : defaultServerColorOverrideJson()) {
                 JsonObject object = element.getAsJsonObject();
@@ -1048,17 +1108,77 @@ public final class ConfigManager {
     }
 
     private static JsonArray defaultServerColorOverrideJson() {
+        JsonArray colors = measuredArtMapPaletteJson();
+        JsonObject legacyUnmeasured = new JsonObject();
+        legacyUnmeasured.addProperty("item", "minecraft:crimson_hyphae");
+        legacyUnmeasured.addProperty("rgb", "#4D1418");
+        colors.add(legacyUnmeasured);
+        return colors;
+    }
+
+    static List<ServerColorOverride> measuredArtMapPalette() {
+        List<ServerColorOverride> colors = new ArrayList<>();
+        for (JsonElement element : measuredArtMapPaletteJson()) {
+            JsonObject object = element.getAsJsonObject();
+            colors.add(new ServerColorOverride(
+                    Identifier.of(object.get("item").getAsString()),
+                    RgbUtil.parseHex(object.get("rgb").getAsString())
+            ));
+        }
+        return List.copyOf(colors);
+    }
+
+    private static JsonArray measuredArtMapPaletteJson() {
         String json = """
                 [
-                  {"item":"minecraft:crimson_nylium","rgb":"#9F2829"},
-                  {"item":"minecraft:beetroot","rgb":"#7D495A"},
-                  {"item":"minecraft:brick","rgb":"#812B2B"},
-                  {"item":"minecraft:red_dye","rgb":"#D70000"},
-                  {"item":"minecraft:apple","rgb":"#773126"},
-                  {"item":"minecraft:spider_eye","rgb":"#874041"},
-                  {"item":"minecraft:crimson_hyphae","rgb":"#4D1418"},
-                  {"item":"minecraft:crimson_stem","rgb":"#7C3450"},
-                  {"item":"minecraft:nether_wart","rgb":"#5E0100"}
+                  {"item":"minecraft:apple","rgb":"#773125"},
+                  {"item":"minecraft:beetroot","rgb":"#7D4958"},
+                  {"item":"minecraft:bone_meal","rgb":"#D7D2C8"},
+                  {"item":"minecraft:brick","rgb":"#812B2A"},
+                  {"item":"minecraft:brown_mushroom","rgb":"#715950"},
+                  {"item":"minecraft:charcoal","rgb":"#1E110C"},
+                  {"item":"minecraft:chorus_fruit","rgb":"#663C47"},
+                  {"item":"minecraft:cobbled_deepslate","rgb":"#545352"},
+                  {"item":"minecraft:cocoa_beans","rgb":"#563F2A"},
+                  {"item":"minecraft:crimson_nylium","rgb":"#9A2726"},
+                  {"item":"minecraft:crimson_stem","rgb":"#4D1418"},
+                  {"item":"minecraft:cyan_dye","rgb":"#3F6A7D"},
+                  {"item":"minecraft:dark_oak_log","rgb":"#78633B"},
+                  {"item":"minecraft:egg","rgb":"#B09383"},
+                  {"item":"minecraft:emerald","rgb":"#00AF2E"},
+                  {"item":"minecraft:flint","rgb":"#3F3F3E"},
+                  {"item":"minecraft:ghast_tear","rgb":"#5E5D5B"},
+                  {"item":"minecraft:glowstone_dust","rgb":"#9C6E1D"},
+                  {"item":"minecraft:gold_nugget","rgb":"#D2C73F"},
+                  {"item":"minecraft:gray_dye","rgb":"#8A8B96"},
+                  {"item":"minecraft:green_dye","rgb":"#566A2A"},
+                  {"item":"minecraft:ink_sac","rgb":"#141414"},
+                  {"item":"minecraft:lapis_block","rgb":"#3333C9"},
+                  {"item":"minecraft:lapis_lazuli","rgb":"#2A3D8C"},
+                  {"item":"minecraft:lapis_ore","rgb":"#3E6BD1"},
+                  {"item":"minecraft:light_blue_dye","rgb":"#5680B0"},
+                  {"item":"minecraft:light_gray_dye","rgb":"#8D8B89"},
+                  {"item":"minecraft:lime_dye","rgb":"#66A413"},
+                  {"item":"minecraft:magenta_dye","rgb":"#953FB0"},
+                  {"item":"minecraft:magma_cream","rgb":"#86441D"},
+                  {"item":"minecraft:melon_seeds","rgb":"#7F5B3F"},
+                  {"item":"minecraft:mycelium","rgb":"#5E5A71"},
+                  {"item":"minecraft:nether_wart","rgb":"#5E0100"},
+                  {"item":"minecraft:orange_dye","rgb":"#B66A2A"},
+                  {"item":"minecraft:packed_ice","rgb":"#8786D1"},
+                  {"item":"minecraft:pink_dye","rgb":"#CB6A87"},
+                  {"item":"minecraft:podzol","rgb":"#3F2A1C"},
+                  {"item":"minecraft:prismarine_crystals","rgb":"#4DB6AE"},
+                  {"item":"minecraft:pumpkin_seeds","rgb":"#D0C385"},
+                  {"item":"minecraft:purple_dye","rgb":"#6A3491"},
+                  {"item":"minecraft:purpur_block","rgb":"#3F334B"},
+                  {"item":"minecraft:red_dye","rgb":"#D10000"},
+                  {"item":"minecraft:snow","rgb":"#D7D5D1"},
+                  {"item":"minecraft:spider_eye","rgb":"#874040"},
+                  {"item":"minecraft:warped_nylium","rgb":"#116669"},
+                  {"item":"minecraft:warped_stem","rgb":"#30736E"},
+                  {"item":"minecraft:warped_wart_block","rgb":"#0F9067"},
+                  {"item":"minecraft:yellow_dye","rgb":"#C0BF2A"}
                 ]
                 """;
         return GSON.fromJson(json, JsonArray.class);
