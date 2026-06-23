@@ -12,11 +12,21 @@ final class BucketExecutionState {
 
     private boolean fillClickOccurred;
     private int anchorCursor;
+    private List<Integer> scriptedAnchors = List.of();
     private List<Integer> activeAnchors = List.of();
 
     void beginImage(List<Integer> scriptedAnchors) {
         if (scriptedAnchors == null || scriptedAnchors.size() != 9) {
             throw new IllegalArgumentException("Smart bucket requires exactly nine scripted anchors.");
+        }
+        this.scriptedAnchors = List.copyOf(scriptedAnchors);
+        activeAnchors = List.of();
+        fillClickOccurred = false;
+    }
+
+    void beginBucketAction() {
+        if (scriptedAnchors.size() != 9) {
+            throw new IllegalStateException("Smart bucket anchors are not initialized.");
         }
         activeAnchors = List.of(
                 scriptedAnchors.get(anchorCursor),

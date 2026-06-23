@@ -15,6 +15,7 @@ class BucketExecutionStateTest {
     void fillClickCanOnlyBeMarkedOncePerImage() {
         BucketExecutionState state = new BucketExecutionState();
         state.beginImage(ANCHORS);
+        state.beginBucketAction();
 
         assertTrue(state.markFillClickIfFirst());
         assertTrue(state.fillClickOccurred());
@@ -25,9 +26,11 @@ class BucketExecutionStateTest {
     void newImageResetsClickGuardWithoutResettingAnchorLoop() {
         BucketExecutionState state = new BucketExecutionState();
         state.beginImage(ANCHORS);
+        state.beginBucketAction();
         state.markFillClickIfFirst();
 
         state.beginImage(ANCHORS);
+        state.beginBucketAction();
 
         assertFalse(state.fillClickOccurred());
         assertEquals(List.of(13, 14, 15), state.activeAnchors());
@@ -38,12 +41,13 @@ class BucketExecutionStateTest {
         BucketExecutionState state = new BucketExecutionState();
 
         state.beginImage(ANCHORS);
+        state.beginBucketAction();
         assertEquals(List.of(10, 11, 12), state.activeAnchors());
-        state.beginImage(ANCHORS);
+        state.beginBucketAction();
         assertEquals(List.of(13, 14, 15), state.activeAnchors());
-        state.beginImage(ANCHORS);
+        state.beginBucketAction();
         assertEquals(List.of(16, 17, 18), state.activeAnchors());
-        state.beginImage(ANCHORS);
+        state.beginBucketAction();
         assertEquals(List.of(10, 11, 12), state.activeAnchors());
     }
 
@@ -51,6 +55,7 @@ class BucketExecutionStateTest {
     void postClickResumeNeverRoutesBackToFillClick() {
         BucketExecutionState state = new BucketExecutionState();
         state.beginImage(ANCHORS);
+        state.beginBucketAction();
         state.markFillClickIfFirst();
 
         assertEquals(BucketExecutionState.ResumeRoute.CONTINUE_POST_FILL, state.resumeRoute(true, false));
@@ -62,6 +67,7 @@ class BucketExecutionStateTest {
     void preClickResumeRestartsPreparationOnly() {
         BucketExecutionState state = new BucketExecutionState();
         state.beginImage(ANCHORS);
+        state.beginBucketAction();
 
         assertEquals(BucketExecutionState.ResumeRoute.RESTART_BEFORE_CLICK, state.resumeRoute(false, true));
     }

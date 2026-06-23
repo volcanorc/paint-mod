@@ -20,6 +20,8 @@ public record PaintAction(
     }
 
     public boolean bucket() {
-        return type == PaintActionType.BUCKET_BASE_COAT || type == PaintActionType.BUCKET_FILL;
+        return type == PaintActionType.BUCKET_BASE_COAT
+                || type == PaintActionType.BUCKET_FILL
+                || type == PaintActionType.COAL_BUCKET_DARKEN;
     }
 }

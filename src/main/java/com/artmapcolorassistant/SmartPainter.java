@@ -56,6 +56,8 @@ public final class SmartPainter {
                 + " queued=" + actions.size()
                 + " smartWaypointTicks=" + SmartWaypointClock.WAYPOINT_TICKS
                 + " bucket=single-initial-left-click"
+                + " coalBlack=" + (preparedPlan != null && preparedPlan.preview().coalBlackPlanned())
+                + " coalPasses=" + (preparedPlan == null ? 0 : preparedPlan.preview().coalBlackPasses())
                 + " hands={" + controller.bucketHandStatus(dominant) + "}"
                 + (bucketDisabledReason == null ? "" : " blocked=\"" + bucketDisabledReason + "\"");
     }
@@ -123,6 +125,11 @@ public final class SmartPainter {
         ArtMapColor dominant = plan.baseCoat().color();
         if (!controller.itemExists(dominant)) {
             return "dominant item " + dominant.item() + " is missing";
+        }
+        for (PaintAction planned : plan.actions()) {
+            if (planned.bucket() && !controller.itemExists(planned.color())) {
+                return "bucket item " + planned.item() + " is missing";
+            }
         }
         if (!controller.exactEmptyBucketInOffhand()) {
             return "offhand must contain exact minecraft:bucket";
@@ -258,7 +265,7 @@ public final class SmartPainter {
     }
 
     private void selectItem(SessionController.MessageSink sink) {
-        PaintStep seed = seedStep();
+        PaintStep seed = selectionStep();
         if (seed == null || !controller.selectStepNow(seed, sink)) {
             pauseWithError(sink, "Smart paint paused because the required color could not be selected.");
             return;
@@ -271,6 +278,7 @@ public final class SmartPainter {
             return;
         }
         if (action.bucket()) {
+            bucketExecution.beginBucketAction();
             bucketPhaseTicks = config.bucketColorSelectDelayTicks();
             phase = Phase.BUCKET_STAGE_AIM;
         } else {
@@ -489,6 +497,14 @@ public final class SmartPainter {
             return null;
         }
         return canvas.targetStep(action.seedIndex());
+    }
+
+    private PaintStep selectionStep() {
+        PaintStep seed = seedStep();
+        if (seed == null || action == null || SmartCanvas.sameColor(seed.matchedColor(), action.color())) {
+            return seed;
+        }
+        return new PaintStep(seed.index(), seed.x(), seed.y(), seed.originalArgb(), false, action.color(), action.item());
     }
 
     private void performClick(AutoClickButton button) {

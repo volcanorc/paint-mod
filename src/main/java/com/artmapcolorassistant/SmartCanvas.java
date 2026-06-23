@@ -132,6 +132,10 @@ public final class SmartCanvas {
         if (action == null || action.color() == null || action.indexes() == null) {
             return;
         }
+        if (action.type() == PaintActionType.COAL_BUCKET_DARKEN) {
+            baseCoatDecisionDone = true;
+            return;
+        }
         for (int index : action.indexes()) {
             if (index >= 0 && index < believed.length && !skipped(index)) {
                 believed[index] = action.color();

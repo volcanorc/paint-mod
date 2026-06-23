@@ -20,6 +20,8 @@ class SmartPaintPlannerTest {
     private static final ArtMapColor WHITE = color("WHITE", "minecraft:bone_meal", 0xF9FFFE);
     private static final ArtMapColor RED = color("RED", "minecraft:red_dye", 0xD70000);
     private static final ArtMapColor BLUE = color("BLUE", "minecraft:lapis_lazuli", 0x3C44AA);
+    private static final ArtMapColor INK_SAC = color("BLACK", "minecraft:ink_sac", 0x141414);
+    private static final ArtMapColor CHARCOAL = color("CHARCOAL", "minecraft:charcoal", 0x1E110C);
 
     @Test
     void dominantBaseCoatIsAlwaysFirstAndOnlyBucket() {
@@ -31,6 +33,51 @@ class SmartPaintPlannerTest {
         assertEquals(RED, plan.baseCoat().color());
         assertEquals(1, plan.preview().bucketActions());
         assertTrue(plan.actions().stream().noneMatch(PaintAction::bucket));
+    }
+
+    @Test
+    void deepBlackMajorityUsesInkSacBaseCoatAndCoalBucketPasses() {
+        PaintSession session = sessionWithRaw(index -> index < 700 ? INK_SAC : BLUE,
+                index -> index < 700 ? 0xFF000000 : 0xFF0000FF);
+
+        PreparedSmartPlan plan = new SmartPaintPlanner().prepare(session, CONFIG);
+
+        assertTrue(plan.available());
+        assertEquals(INK_SAC.item(), plan.baseCoat().item());
+        assertEquals(3, plan.preview().bucketActions());
+        assertTrue(plan.preview().coalBlackPlanned());
+        assertEquals(2, plan.preview().coalBlackPasses());
+        assertEquals(700, plan.preview().deepBlackPixels());
+        assertEquals(PaintActionType.COAL_BUCKET_DARKEN, plan.actions().get(0).type());
+        assertEquals(DeepBlackAnalyzer.COAL, plan.actions().get(0).item());
+        assertEquals(PaintActionType.COAL_BUCKET_DARKEN, plan.actions().get(1).type());
+        assertEquals(DeepBlackAnalyzer.COAL, plan.actions().get(1).item());
+    }
+
+    @Test
+    void charcoalMajorityDoesNotTriggerCoalBlackBaseCoat() {
+        PaintSession session = sessionWithRaw(index -> index < 700 ? CHARCOAL : BLUE,
+                index -> index < 700 ? 0xFF1E110C : 0xFF0000FF);
+
+        PreparedSmartPlan plan = new SmartPaintPlanner().prepare(session, CONFIG);
+
+        assertTrue(plan.available());
+        assertEquals(CHARCOAL.item(), plan.baseCoat().item());
+        assertFalse(plan.preview().coalBlackPlanned());
+        assertEquals(0, plan.preview().coalBlackPasses());
+        assertTrue(plan.actions().stream().noneMatch(action -> action.type() == PaintActionType.COAL_BUCKET_DARKEN));
+    }
+
+    @Test
+    void coalBlackPassesCanBeDisabledAndClamped() {
+        ConfigManager.Config disabled = CONFIG.withSmartCoalBlackSettings(false, 2, 0.55D);
+        PaintSession session = sessionWithRaw(index -> INK_SAC, index -> 0xFF000000);
+
+        PreparedSmartPlan disabledPlan = new SmartPaintPlanner().prepare(session, disabled);
+
+        assertFalse(disabledPlan.preview().coalBlackPlanned());
+        assertEquals(1, disabled.withSmartCoalBlackSettings(true, -5, 0.55D).smartCoalBlackPasses());
+        assertEquals(2, disabled.withSmartCoalBlackSettings(true, 99, 0.55D).smartCoalBlackPasses());
     }
 
     @Test
@@ -222,6 +269,17 @@ class SmartPaintPlannerTest {
         return new PaintSession("synthetic.png", steps, List.of(WHITE, RED, BLUE));
     }
 
+    private static PaintSession sessionWithRaw(ColorAt colorAt, RawAt rawAt) {
+        int size = CONFIG.canvasWidth() * CONFIG.canvasHeight();
+        List<PaintStep> steps = new ArrayList<>();
+        for (int i = 0; i < size; i++) {
+            ArtMapColor color = colorAt.color(i);
+            steps.add(new PaintStep(i, CanvasMath.toX(i, CONFIG.canvasWidth()), CanvasMath.toY(i, CONFIG.canvasWidth()),
+                    rawAt.argb(i), false, color, color.item()));
+        }
+        return new PaintSession("synthetic.png", steps, List.of(WHITE, RED, BLUE, INK_SAC, CHARCOAL));
+    }
+
     private static PaintAction action(PaintActionType type, ArtMapColor color, List<Integer> indexes) {
         int seed = indexes.getFirst();
         return new PaintAction(type, color, color.item(), indexes, seed, seed, indexes.getLast(), 1, "test");
@@ -233,6 +291,10 @@ class SmartPaintPlannerTest {
 
     private interface ColorAt {
         ArtMapColor color(int index);
+    }
+
+    private interface RawAt {
+        int argb(int index);
     }
 
     private interface SkipAt {

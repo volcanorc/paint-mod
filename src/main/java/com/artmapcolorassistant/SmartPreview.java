@@ -18,6 +18,9 @@ public record SmartPreview(
         ArtMapColor selectedBaseCoatColor,
         boolean baseCoatPlanned,
         String baseCoatReason,
+        boolean coalBlackPlanned,
+        int coalBlackPasses,
+        int deepBlackPixels,
         String riskLevel
 ) {
     public String summary() {
@@ -31,6 +34,9 @@ public record SmartPreview(
                 + " basecoat=" + baseCoat
                 + " basecoatFirst=" + baseCoatPlanned
                 + " basecoatReason=\"" + baseCoatReason + "\""
+                + " coalBlack=" + coalBlackPlanned
+                + " coalPasses=" + coalBlackPasses
+                + " deepBlackPixels=" + deepBlackPixels
                 + " buckets=" + bucketActions
                 + " dragRuns=" + dragActions
                 + " manual=" + manualActions

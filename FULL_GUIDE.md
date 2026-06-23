@@ -229,12 +229,15 @@ Smart mode normally expects:
 
 The initial bucket sequence selects the dominant item, checks both hands, swaps the color and bucket, aims at guarded center anchors, sends one fill click, restores the hands, and verifies the result. Pause/resume protection prevents the same fill click from being sent twice.
 
+For mostly pure-black artwork, Smart can use a special deep-black basecoat: it bucket-fills with Ink Sac first, then runs one or two guarded Coal bucket passes. Coal is still not used as a normal pixel-matching color; it is only used as a Smart bucket darkening tool after the Ink Sac basecoat.
+
 Useful checks:
 
 ```text
 #painting smart preview
 #painting smart status
 #painting bucket status
+#painting coalblack status
 ```
 
 Smart bucket delay commands are advanced controls. Increase delays if the server or connection responds slowly.
@@ -372,6 +375,18 @@ Bucket settings can be changed while Painting Type is Smart.
 - `#painting bucket restoredelay <ticks>` — Set the hand-restoration verification delay.
 
 Default bucket delays are 10, 20, 16, 24, and 10 ticks in that order.
+
+### Coal Black Commands
+
+Coal black is Smart-only. It helps mostly pure-black images become darker than the normal Ink Sac basecoat.
+
+- `#painting coalblack on` — Enable Ink Sac plus Coal bucket deep-black passes.
+- `#painting coalblack off` — Disable Coal bucket deep-black passes.
+- `#painting coalblack status` — Show whether the feature is enabled, pass count, and threshold.
+- `#painting coalblack passes 1` — Use one Coal bucket darkening pass.
+- `#painting coalblack passes 2` — Use two Coal bucket darkening passes for the deepest black.
+
+Coal still stays out of normal Manual/Auto pixel matching. It only runs after a safe Ink Sac bucket basecoat when the image is mostly pure or neutral near-black.
 
 ### Batch Commands
 

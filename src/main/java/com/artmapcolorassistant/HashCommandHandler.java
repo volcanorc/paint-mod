@@ -145,6 +145,7 @@ public final class HashCommandHandler {
             case "auto" -> handleAuto(parts, sink);
             case "smart" -> handleSmart(parts, sink);
             case "bucket" -> handleBucket(parts, sink);
+            case "coalblack" -> handleCoalBlack(parts, sink);
             case "palette" -> handlePalette(parts, sink);
             case "batch" -> handleBatch(parts, sink);
             case "postpaint" -> handlePostPaint(parts, sink);
@@ -358,6 +359,8 @@ public final class HashCommandHandler {
                 sink.info(readiness("bucket on", config.bucketEnabled()));
                 sink.info(readiness("offhand empty bucket", controller.exactEmptyBucketInOffhand()));
                 sink.info(readiness("basecoat on", config.smartBaseCoatEnabled()));
+                sink.info(readiness("coal black bucket " + (config.smartCoalBlackBasecoatEnabled() ? "on" : "off")
+                        + " passes " + config.smartCoalBlackPasses(), config.smartCoalBlackBasecoatEnabled()));
                 sink.info(readiness("auto speed " + autoPainter.delayTicks(), autoPainter.delayTicks() == 5));
                 sink.info(readiness("auto drag fallback on", autoPainter.dragEnabled()));
                 sink.info(readiness("auto swap from inventory", config.autoSwapFromInventory()));
@@ -847,6 +850,49 @@ public final class HashCommandHandler {
         }
     }
 
+    private void handleCoalBlack(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length < 2) {
+            sink.error("Usage: #painting coalblack on|off|status|passes 1|2");
+            return;
+        }
+        switch (parts[1].toLowerCase(Locale.ROOT)) {
+            case "on" -> {
+                configManager.setSmartCoalBlackBasecoatEnabled(true, text -> sink.error(text.getString()));
+                sink.info("Smart Coal deep-black bucket passes enabled.");
+            }
+            case "off" -> {
+                configManager.setSmartCoalBlackBasecoatEnabled(false, text -> sink.error(text.getString()));
+                smartPainter.invalidateTrust("coal black disabled");
+                sink.info("Smart Coal deep-black bucket passes disabled.");
+            }
+            case "status" -> coalBlackStatus(sink);
+            case "passes" -> {
+                if (parts.length != 3) {
+                    sink.error("Usage: #painting coalblack passes 1|2");
+                    return;
+                }
+                try {
+                    int passes = Integer.parseInt(parts[2]);
+                    configManager.setSmartCoalBlackPasses(passes, text -> sink.error(text.getString()));
+                    sink.info("Smart Coal deep-black bucket passes set to " + Math.max(1, Math.min(2, passes)) + ".");
+                } catch (NumberFormatException e) {
+                    sink.error("Coal black passes must be 1 or 2.");
+                }
+            }
+            default -> sink.error("Usage: #painting coalblack on|off|status|passes 1|2");
+        }
+    }
+
+    private void coalBlackStatus(SessionController.MessageSink sink) {
+        ConfigManager.Config config = configManager.config();
+        sink.info("Coal black basecoat enabled=" + config.smartCoalBlackBasecoatEnabled()
+                + " passes=" + config.smartCoalBlackPasses()
+                + " dominanceThreshold=" + String.format(Locale.ROOT, "%.0f%%", config.smartCoalBlackDominanceThreshold() * 100.0D)
+                + " smartOnly=true"
+                + " coalNormalMatching=false"
+                + " requiresOffhandBucket=" + controller.exactEmptyBucketInOffhand() + ".");
+    }
+
     private void smartPreview(SessionController.MessageSink sink) {
         SmartPreview preview = smartPainter.preview(configManager.config());
         if (preview == null) {
@@ -957,7 +1003,7 @@ public final class HashCommandHandler {
     }
 
     private void usage(SessionController.MessageSink sink) {
-        sink.info("Usage: #painting help, gui, <file.png>, dryrun, palette ..., batch ..., postpaint ..., rename ..., pv <1-40>, pv2 ..., auto full, stop, pause, resume, back, skip, goto, calibrate ..., usecalibration <name>, cal ...");
+        sink.info("Usage: #painting help, gui, <file.png>, dryrun, palette ..., coalblack ..., batch ..., postpaint ..., rename ..., pv <1-40>, pv2 ..., auto full, stop, pause, resume, back, skip, goto, calibrate ..., usecalibration <name>, cal ...");
     }
 
     private void openGui(SessionController.MessageSink sink) {
@@ -989,6 +1035,9 @@ public final class HashCommandHandler {
         }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting bucket")) {
             helpLine(sink, "#painting bucket " + entry.command(), entry.description());
+        }
+        for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting coalblack")) {
+            helpLine(sink, "#painting coalblack " + entry.command(), entry.description());
         }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting palette")) {
             helpLine(sink, "#painting palette " + entry.command(), entry.description());

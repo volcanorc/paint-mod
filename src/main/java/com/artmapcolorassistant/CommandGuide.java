@@ -23,6 +23,7 @@ public final class CommandGuide {
             new Entry("auto", "Auto painting controls."),
             new Entry("smart", "Smart hybrid painting controls."),
             new Entry("bucket", "Smart bucket timing and guard controls."),
+            new Entry("coalblack", "Smart Ink Sac plus Coal deep-black bucket controls."),
             new Entry("calibrate", "Exact calibration controls."),
             new Entry("calibration", "Portable calibration mode."),
             new Entry("cal", "Corner calibration and aim test."),
@@ -58,6 +59,12 @@ public final class CommandGuide {
             new Entry("aimdelay <ticks>", "Set fill-anchor aim delay."),
             new Entry("afterdelay <ticks>", "Set post-fill delay."),
             new Entry("restoredelay <ticks>", "Set hand-restoration delay.")
+    );
+    private static final List<Entry> COALBLACK = List.of(
+            new Entry("on", "Enable Ink Sac plus Coal deep-black bucket passes."),
+            new Entry("off", "Disable Coal deep-black bucket passes."),
+            new Entry("status", "Show deep-black bucket settings."),
+            new Entry("passes 1|2", "Set Coal bucket darkening passes.")
     );
     private static final List<Entry> PALETTE = List.of(
             new Entry("status", "Show loaded and usable colors."),
@@ -179,6 +186,11 @@ public final class CommandGuide {
                     argument("aimdelay", "Set fill-anchor aim delay.", "<ticks>"),
                     argument("afterdelay", "Set post-fill delay.", "<ticks>"),
                     argument("restoredelay", "Set hand-restoration delay.", "<ticks>")),
+            branch("coalblack", "Smart Ink Sac plus Coal deep-black controls.",
+                    leaf("on", "Enable Coal deep-black bucket passes."),
+                    leaf("off", "Disable Coal deep-black bucket passes."),
+                    leaf("status", "Show Coal deep-black settings."),
+                    argument("passes", "Set Coal deep-black bucket passes.", "<1|2>")),
             branch("calibrate", "Exact calibration controls.",
                     argument("start", "Start a fresh exact calibration.", "<name>"),
                     argument("continue", "Continue a saved calibration.", "<name>"),
@@ -235,6 +247,9 @@ public final class CommandGuide {
         }
         if (lower.startsWith("bucket")) {
             return BUCKET;
+        }
+        if (lower.startsWith("coalblack")) {
+            return COALBLACK;
         }
         if (lower.startsWith("palette")) {
             return PALETTE;

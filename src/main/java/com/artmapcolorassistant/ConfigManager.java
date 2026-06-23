@@ -141,6 +141,10 @@ public final class ConfigManager {
         boolean smartBaseCoatEnabled = boolValue(root, "smartBaseCoatEnabled", defaults.smartBaseCoatEnabled);
         int smartBucketThreshold = Math.max(2, intValue(root, "smartBucketThreshold", defaults.smartBucketThreshold));
         int smartDragThreshold = Math.max(2, intValue(root, "smartDragThreshold", defaults.smartDragThreshold));
+        boolean smartCoalBlackBasecoatEnabled = boolValue(root, "smartCoalBlackBasecoatEnabled", defaults.smartCoalBlackBasecoatEnabled);
+        int smartCoalBlackPasses = clamp(intValue(root, "smartCoalBlackPasses", defaults.smartCoalBlackPasses), 1, 2);
+        double smartCoalBlackDominanceThreshold = clampDouble(doubleValue(root, "smartCoalBlackDominanceThreshold",
+                defaults.smartCoalBlackDominanceThreshold), 0.10D, 1.0D);
         boolean bucketEnabled = boolValue(root, "bucketEnabled", defaults.bucketEnabled);
         int bucketClickRepeats = Math.max(0, intValue(root, "bucketColorSelectDelayTicks", defaults.bucketClickRepeats));
         int bucketClickGapTicks = Math.max(0, intValue(root, "bucketHandSwapDelayTicks", defaults.bucketClickGapTicks));
@@ -219,7 +223,8 @@ public final class ConfigManager {
                 autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                 autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                 autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
-                smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, bucketEnabled,
                 bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
                 bucketAfterDelayTicks, selectedCalibrationName,
                 serverColorOverridesEnabled, List.copyOf(serverColorOverrides),
@@ -315,6 +320,9 @@ public final class ConfigManager {
         root.addProperty("smartBaseCoatEnabled", value.smartBaseCoatEnabled);
         root.addProperty("smartBucketThreshold", value.smartBucketThreshold);
         root.addProperty("smartDragThreshold", value.smartDragThreshold);
+        root.addProperty("smartCoalBlackBasecoatEnabled", value.smartCoalBlackBasecoatEnabled);
+        root.addProperty("smartCoalBlackPasses", value.smartCoalBlackPasses);
+        root.addProperty("smartCoalBlackDominanceThreshold", value.smartCoalBlackDominanceThreshold);
         root.addProperty("bucketEnabled", value.bucketEnabled);
         root.addProperty("bucketColorSelectDelayTicks", value.bucketColorSelectDelayTicks());
         root.addProperty("bucketHandSwapDelayTicks", value.bucketHandSwapDelayTicks());
@@ -442,6 +450,18 @@ public final class ConfigManager {
         config = config.withSmartSettings(config.smartEnabled(), config.smartMode(), config.smartBaseCoatEnabled(),
                 config.smartBucketThreshold(), Math.max(2, value));
         saveConfigChange("smart drag threshold", warningSink);
+    }
+
+    public void setSmartCoalBlackBasecoatEnabled(boolean enabled, Consumer<Text> warningSink) {
+        config = config.withSmartCoalBlackSettings(enabled, config.smartCoalBlackPasses(),
+                config.smartCoalBlackDominanceThreshold());
+        saveConfigChange("smart coal black basecoat", warningSink);
+    }
+
+    public void setSmartCoalBlackPasses(int value, Consumer<Text> warningSink) {
+        config = config.withSmartCoalBlackSettings(config.smartCoalBlackBasecoatEnabled(), value,
+                config.smartCoalBlackDominanceThreshold());
+        saveConfigChange("smart coal black passes", warningSink);
     }
 
     public void setBucketEnabled(boolean enabled, Consumer<Text> warningSink) {
@@ -731,6 +751,9 @@ public final class ConfigManager {
             boolean smartBaseCoatEnabled,
             int smartBucketThreshold,
             int smartDragThreshold,
+            boolean smartCoalBlackBasecoatEnabled,
+            int smartCoalBlackPasses,
+            double smartCoalBlackDominanceThreshold,
             boolean bucketEnabled,
             int bucketClickRepeats,
             int bucketClickGapTicks,
@@ -798,7 +821,8 @@ public final class ConfigManager {
                     autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
-                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, bucketEnabled,
                     bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
                     bucketAfterDelayTicks, ConfigManager.sanitizeCalibrationName(value),
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
@@ -827,7 +851,8 @@ public final class ConfigManager {
                     autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
-                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, bucketEnabled,
                     bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
                     bucketAfterDelayTicks, selectedCalibrationName,
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
@@ -852,7 +877,8 @@ public final class ConfigManager {
                     autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
-                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, bucketEnabled,
                     bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
                     bucketAfterDelayTicks, selectedCalibrationName,
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
@@ -886,7 +912,8 @@ public final class ConfigManager {
                     autoEnablePortableForBundledCalibration, nextDrag,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, nextSmart, smartMode,
-                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, nextBucket,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, nextBucket,
                     nextBucketRepeats, nextBucketGapTicks, 16, 24,
                     nextBucketAfterDelayTicks, "ee",
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
@@ -911,7 +938,8 @@ public final class ConfigManager {
                     autoEnablePortableForBundledCalibration, value,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
-                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, bucketEnabled,
                     bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
                     bucketAfterDelayTicks, selectedCalibrationName,
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
@@ -945,7 +973,35 @@ public final class ConfigManager {
                     autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, enabled, mode,
-                    baseCoatEnabled, Math.max(2, bucketThreshold), Math.max(2, dragThreshold), bucketEnabled,
+                    baseCoatEnabled, Math.max(2, bucketThreshold), Math.max(2, dragThreshold),
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, bucketEnabled,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, selectedCalibrationName,
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, batchEnableDrag, postPaintAutomationEnabled,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, postPaintVaultCommand, postPaintSaveSelectDelayTicks,
+                    postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
+                    postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
+                    postPaintFunJumpGapTicks, postPaintRenameClickPoint,
+                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+        }
+
+        public Config withSmartCoalBlackSettings(boolean enabled, int passes, double dominanceThreshold) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    enabled, ConfigManager.clamp(passes, 1, 2),
+                    ConfigManager.clampDouble(dominanceThreshold, 0.10D, 1.0D), bucketEnabled,
                     bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
                     bucketAfterDelayTicks, selectedCalibrationName,
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
@@ -971,7 +1027,8 @@ public final class ConfigManager {
                     autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
-                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, enabled,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, enabled,
                     ConfigManager.clamp(repeats, 1, 4), Math.max(0, gapTicks), Math.max(0, swapDelayTicks),
                     Math.max(0, aimSettleTicks), Math.max(0, afterDelayTicks), selectedCalibrationName,
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
@@ -996,7 +1053,8 @@ public final class ConfigManager {
                     autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
                     autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
                     autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
-                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold, bucketEnabled,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, bucketEnabled,
                     bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
                     bucketAfterDelayTicks, selectedCalibrationName,
                     serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
@@ -1036,7 +1094,7 @@ public final class ConfigManager {
                     5, 5, AutoClickButton.RIGHT, 2, 0.75D, true, true, false,
                     true, "ee", true, 45.0D, true,
                     true, 2, 5, true, 2, 1, true, SmartPaintMode.AGGRESSIVE,
-                    true, 10, 2, true, 10, 20, 16, 24, 10, "ee", true, List.copyOf(overrides),
+                    true, 10, 2, true, 2, 0.55D, true, 10, 20, 16, 24, 10, "ee", true, List.copyOf(overrides),
                     true, 5, true, true, 2, 0, 1, 500, "/pv 2", 2, 3, 20, 2, true, 5, 2, 4, null, null,
                     List.copyOf(colors), overrideResult.colors());
         }

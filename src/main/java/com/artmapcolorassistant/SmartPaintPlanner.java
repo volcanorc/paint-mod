@@ -20,26 +20,35 @@ public final class SmartPaintPlanner {
         SmartCanvas canvas = SmartCanvas.fresh(session, config);
         int originalWrong = canvas.wrongCount();
         int oldTicks = canvas.paintableCount() * ActionCostModel.manual(config);
-        ArtMapColor dominant = dominantNonBlankTargetColor(canvas);
+        DeepBlackAnalyzer.Analysis deepBlack = DeepBlackAnalyzer.analyze(canvas, config);
+        ArtMapColor dominant = deepBlack.active() ? DeepBlackAnalyzer.findInkSac(config) : dominantNonBlankTargetColor(canvas);
         List<Integer> anchors = scriptedAnchors(canvas);
         String unavailable = baseCoatUnavailableReason(canvas, config, dominant);
         if (unavailable == null && anchors.size() != 9) {
             unavailable = "canvas is too small for nine unique bucket anchors";
         }
+        if (unavailable == null && deepBlack.active() && DeepBlackAnalyzer.findCoal(config) == null) {
+            unavailable = "deep-black Coal bucket is enabled but minecraft:coal is not configured";
+        }
         if (unavailable != null) {
             SmartPreview preview = preview(oldTicks, originalWrong, List.of(), dominant, null, unavailable,
-                    ComponentAnalyzer.wrongPixelComponents(canvas).size(), 0);
+                    ComponentAnalyzer.wrongPixelComponents(canvas).size(), 0, DeepBlackAnalyzer.Analysis.disabled());
             return new PreparedSmartPlan(null, List.of(), anchors, preview, unavailable);
         }
 
         PaintAction baseCoat = baseCoatAction(canvas, dominant, config);
         canvas.apply(baseCoat);
+        List<PaintAction> coalActions = coalBlackActions(canvas, deepBlack, config, baseCoat.seedIndex());
+        coalActions.forEach(canvas::apply);
         List<PaintAction> actions = connectedActions(canvas, config);
+        ArrayList<PaintAction> allActions = new ArrayList<>(coalActions);
+        allActions.addAll(actions);
         int componentCount = ComponentAnalyzer.wrongPixelComponents(canvas).size();
-        int smartTicks = baseCoat.estimatedTicks() + actions.stream().mapToInt(PaintAction::estimatedTicks).sum();
-        SmartPreview preview = preview(oldTicks, originalWrong, actions, dominant, dominant,
-                "mandatory dominant-color startup base coat", componentCount, smartTicks);
-        return new PreparedSmartPlan(baseCoat, actions, anchors, preview, null);
+        int smartTicks = baseCoat.estimatedTicks() + allActions.stream().mapToInt(PaintAction::estimatedTicks).sum();
+        SmartPreview preview = preview(oldTicks, originalWrong, allActions, dominant, dominant,
+                deepBlack.active() ? "deep-black Ink Sac base coat with Coal bucket darkening" : "mandatory dominant-color startup base coat",
+                componentCount, smartTicks, deepBlack);
+        return new PreparedSmartPlan(baseCoat, allActions, anchors, preview, null);
     }
 
     public SmartPreview preview(PaintSession session, ConfigManager.Config config) {
@@ -128,9 +137,36 @@ public final class SmartPaintPlanner {
                 }
             }
         }
+        if (representative < 0 && !indexes.isEmpty()) {
+            representative = indexes.getFirst();
+        }
         return new PaintAction(PaintActionType.BUCKET_BASE_COAT, color, color.item(), List.copyOf(indexes),
                 representative, representative, representative, ActionCostModel.bucket(config),
                 "mandatory dominant-color startup base coat");
+    }
+
+    private List<PaintAction> coalBlackActions(SmartCanvas canvas, DeepBlackAnalyzer.Analysis deepBlack,
+                                               ConfigManager.Config config, int representative) {
+        if (!deepBlack.active()) {
+            return List.of();
+        }
+        ArtMapColor coal = DeepBlackAnalyzer.findCoal(config);
+        if (coal == null) {
+            return List.of();
+        }
+        ArrayList<Integer> indexes = new ArrayList<>(canvas.size());
+        for (int i = 0; i < canvas.size(); i++) {
+            if (!canvas.skipped(i)) {
+                indexes.add(i);
+            }
+        }
+        int seed = representative >= 0 ? representative : indexes.getFirst();
+        ArrayList<PaintAction> actions = new ArrayList<>();
+        for (int pass = 1; pass <= deepBlack.coalPasses(); pass++) {
+            actions.add(new PaintAction(PaintActionType.COAL_BUCKET_DARKEN, coal, coal.item(), List.copyOf(indexes),
+                    seed, seed, seed, ActionCostModel.bucket(config), "Coal bucket deep-black pass " + pass));
+        }
+        return List.copyOf(actions);
     }
 
     private List<PaintAction> connectedActions(SmartCanvas canvas, ConfigManager.Config config) {
@@ -241,21 +277,24 @@ public final class SmartPaintPlanner {
 
     private SmartPreview preview(int oldTicks, int originalWrong, List<PaintAction> actions,
                                  ArtMapColor dominant, ArtMapColor baseCoat, String reason,
-                                 int componentCount, int smartTicks) {
+                                 int componentCount, int smartTicks, DeepBlackAnalyzer.Analysis deepBlack) {
         int manual = 0;
         int drags = 0;
+        int coalBuckets = 0;
         for (PaintAction action : actions) {
             if (action.type() == PaintActionType.MANUAL_CLICK) {
                 manual++;
             } else if (action.type() == PaintActionType.DRAG_RUN) {
                 drags++;
+            } else if (action.type() == PaintActionType.COAL_BUCKET_DARKEN) {
+                coalBuckets++;
             }
         }
-        int bucketActions = baseCoat == null ? 0 : 1;
+        int bucketActions = (baseCoat == null ? 0 : 1) + coalBuckets;
         String risk = baseCoat == null ? "blocked" : "low";
         return new SmartPreview(oldTicks, originalWrong * Math.max(1, oldTicks / Math.max(1, originalWrong)),
                 smartTicks, oldTicks - smartTicks, manual, drags, bucketActions, 0,
                 0, 0, 0, originalWrong, componentCount, dominant, baseCoat,
-                baseCoat != null, reason, risk);
+                baseCoat != null, reason, deepBlack.active(), coalBuckets, deepBlack.deepBlackPixels(), risk);
     }
 }
