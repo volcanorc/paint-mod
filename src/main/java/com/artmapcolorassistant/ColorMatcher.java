@@ -11,10 +11,15 @@ import java.util.Map;
 import java.util.Set;
 
 public final class ColorMatcher {
+    private static final Identifier COAL = Identifier.of("minecraft:coal");
+
     public List<ArtMapColor> buildMatchingPalette(ConfigManager.Config config, InventoryHelper.InventorySnapshot inventory) {
         Set<Identifier> available = inventory.availableItemIds();
         List<ArtMapColor> result = new ArrayList<>();
         for (ArtMapColor color : config.effectiveArtMapColors()) {
+            if (COAL.equals(color.item())) {
+                continue;
+            }
             if (color.tool() && !config.includeToolsInColorMatching()) {
                 continue;
             }

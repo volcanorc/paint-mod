@@ -64,6 +64,22 @@ class MeasuredArtMapPaletteTest {
     }
 
     @Test
+    void coalIsNeverUsedForNormalMatchingEvenWhenToolMatchingIsEnabled() {
+        ConfigManager.Config toolMatching = withToolMatching(ConfigManager.Config.defaults(), true);
+        ColorMatcher matcher = new ColorMatcher();
+        InventoryHelper.InventorySnapshot inventory = new InventoryHelper.InventorySnapshot(Map.of(
+                INK_SAC, 64,
+                CHARCOAL, 64,
+                COAL, 64
+        ));
+
+        List<ArtMapColor> palette = matcher.buildMatchingPalette(toolMatching, inventory);
+
+        assertFalse(palette.stream().anyMatch(color -> color.item().equals(COAL)));
+        assertEquals(INK_SAC, matcher.nearest(0x000000, palette, toolMatching.colorMatchMode()).item());
+    }
+
+    @Test
     void migrationUpdatesOldBaseColorsAndAddsMissingMeasuredItems() {
         List<ArtMapColor> old = List.of(
                 color("BLACK", INK_SAC, 0x1D1D21, false),
@@ -121,5 +137,35 @@ class MeasuredArtMapPaletteTest {
                 .findFirst()
                 .orElseThrow()
                 .rgb();
+    }
+
+    private static ConfigManager.Config withToolMatching(ConfigManager.Config config, boolean includeTools) {
+        return new ConfigManager.Config(config.canvasWidth(), config.canvasHeight(), config.reservedHotbarSlot(),
+                config.autoSwapFromInventory(), config.advanceOnLeftClick(), config.advanceOnRightClick(),
+                config.onlyAdvanceWhenCrosshairTargetExists(), config.alphaThreshold(),
+                config.transparentPixelMode(), config.debug(), config.useOnlyInventoryAvailableColors(),
+                config.colorMatchMode(), includeTools, config.confirmMode(), config.paintingMode(),
+                config.autoPaintDefaultDelayTicks(), config.autoPaintMinDelayTicks(), config.autoPaintClickButton(),
+                config.autoAimSettleTicks(), config.autoAimToleranceDegrees(), config.autoRequireCalibration(),
+                config.autoLockCameraDuringAuto(), config.portableExactCalibrationMode(),
+                config.useBundledDirectionalCalibration(), config.defaultBundledCalibrationPrefix(),
+                config.autoDetectCalibrationDirectionOnAutoStart(), config.cardinalDirectionToleranceDegrees(),
+                config.autoEnablePortableForBundledCalibration(), config.autoDragSameColorRuns(),
+                config.autoDragMinRunLength(), config.autoDragPixelTicks(), config.autoDragRequireExactCalibration(),
+                config.autoDragStartHoldTicks(), config.autoDragEndHoldTicks(), config.smartEnabled(),
+                config.smartMode(), config.smartBaseCoatEnabled(), config.smartBucketThreshold(),
+                config.smartDragThreshold(), config.smartCoalBlackBasecoatEnabled(), config.smartCoalBlackPasses(),
+                config.smartCoalBlackDominanceThreshold(), config.bucketEnabled(), config.bucketClickRepeats(),
+                config.bucketClickGapTicks(), config.bucketSwapDelayTicks(), config.bucketAimSettleTicks(),
+                config.bucketAfterDelayTicks(), config.selectedCalibrationName(), config.serverColorOverridesEnabled(),
+                config.serverColorOverrides(), config.batchAutoStartAfterContinue(), config.batchDefaultSpeedTicks(),
+                config.batchEnableDrag(), config.postPaintAutomationEnabled(), config.postPaintSaveHotbarSlot(),
+                config.postPaintFinishedHotbarSlot(), config.postPaintBlankCanvasHotbarSlot(),
+                config.postPaintAimCalibrationIndex(), config.postPaintVaultCommand(),
+                config.postPaintSaveSelectDelayTicks(), config.postPaintSaveAimSettleTicks(),
+                config.postPaintRenameOpenDelayTicks(), config.postPaintRightClickRetries(),
+                config.postPaintFunJumpsEnabled(), config.postPaintFunJumpCount(), config.postPaintFunJumpPressTicks(),
+                config.postPaintFunJumpGapTicks(), config.postPaintRenameClickPoint(),
+                config.postPaintPv2ClickPoint(), config.artMapColors(), config.effectiveArtMapColors());
     }
 }
