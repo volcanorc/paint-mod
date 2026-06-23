@@ -418,10 +418,17 @@ public final class HashCommandHandler {
         sink.info("Minecraft=" + SharedConstants.getGameVersion().getName()
                 + " Java=" + System.getProperty("java.version", "unknown")
                 + " OS=" + System.getProperty("os.name", "unknown")
-                + " fabricApiLoaded=" + FabricLoader.getInstance().isModLoaded("fabric-api")
+                + " FabricLoader=" + installedModVersion("fabricloader")
+                + " FabricAPI=" + installedModVersion("fabric-api")
                 + " selectedCalibration=" + config.selectedCalibrationName()
                 + " portableExactCalibration=" + config.portableExactCalibrationMode());
         paths(sink);
+    }
+
+    private String installedModVersion(String modId) {
+        return FabricLoader.getInstance().getModContainer(modId)
+                .map(container -> container.getMetadata().getVersion().getFriendlyString())
+                .orElse("missing");
     }
 
     private void androidTestInput(SessionController.MessageSink sink) {

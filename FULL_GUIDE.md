@@ -42,9 +42,9 @@ The mod does not edit server data and does not bypass ArtMap. Auto and Smart mod
 You need:
 
 - Minecraft Java Edition 1.21.1
-- Fabric Loader
-- Fabric API
-- Java 21
+- Fabric Loader 0.15.11 or newer
+- Fabric API 0.101.2+1.21.1 or newer for Minecraft 1.21.1
+- Java 21 or newer
 - An ArtMapColorAssistant release JAR
 
 Install it:
@@ -55,6 +55,8 @@ Install it:
 4. Put the downloaded `artmap-color-assistant-*.jar` in the same `mods` folder.
 5. Start the Fabric profile.
 6. Run `#painting paths` in Minecraft chat to see the folders used by the current launcher.
+
+The mod is built and tested with the latest 1.21.1 stack, but accepts the broader compatible range above. Use only a Fabric API JAR whose filename ends in `+1.21.1`; an API for a different Minecraft version is not interchangeable.
 
 ## Folders and Image Preparation
 
@@ -293,6 +295,20 @@ Both `#painting` and `#paint` work as prefixes. For example, `#paint stop` is th
 
 All messages whose trimmed text begins with `#` are intercepted by the mod and never sent to server chat. Unknown hash commands show a local warning and clickable ArtMap command help.
 
+### Local Command Suggestions
+
+Typing `#painting` or its shorter `#paint` alias opens the client-only foreground suggestion panel. Its single black background is 80% opaque, keeping commands readable while a little server chat remains visible. It does not contact the server or replace normal `/` command suggestions.
+
+- **Tab** selects and cycles forward through matching commands.
+- **Shift+Tab** cycles backward.
+- **Up/Down** moves through the highlighted choices while the local panel is open.
+- Click a row to place that completion into chat.
+- Long lists keep eight rows visible and follow the selected command automatically.
+- Fixed choices such as `manual`, `auto`, `smart`, `on`, and `off` can be completed.
+- Gray placeholders such as `<ticks>`, `<name>`, and `<file.png>` are instructions only. Type the real value yourself.
+
+Selecting a suggestion only fills the chat box. Press Enter separately to run the local command. Normal chat history and server suggestions such as `/tpa <player>` remain unchanged when the local painting panel is not active.
+
 ### General and Session Commands
 
 - `#painting help` — Show clickable command help in Minecraft chat.
@@ -435,6 +451,17 @@ This is a normal Fabric Java mod, not an Android APK. Use a Java launcher capabl
 8. Re-record rename click points on the device because GUI scale and touch layout differ.
 
 ## Troubleshooting
+
+### Fabric reports incompatible mods or asks for another Fabric API
+
+- Confirm Minecraft is exactly `1.21.1` and Java is version 21 or newer.
+- Use Fabric Loader `0.15.11` or newer and Fabric API `0.101.2+1.21.1` or newer.
+- Keep exactly one Fabric API JAR in the active `mods` folder. Remove duplicate or older copies.
+- Confirm the Fabric API filename ends in `+1.21.1`; a build for 1.21, 1.21.2, or another Minecraft version is not compatible.
+- Open `.minecraft/logs/latest.log` and search for `Incompatible mods found!`. The lines below it show the detected and required versions even when a launcher screen does not.
+- If Minecraft reaches the menu, run `#painting android status` to print the detected Minecraft, Java, Fabric Loader, and Fabric API versions.
+
+Fabric dependency checks happen before this mod starts, so `#painting android status` cannot run when the loader stops at the incompatibility screen.
 
 ### The image is not listed
 

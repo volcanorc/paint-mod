@@ -6,7 +6,8 @@
     "ChatScreenMixin",
     "GameRendererInvoker",
     "HandledScreenInvoker",
-    "MinecraftClientInvoker"
+    "MinecraftClientInvoker",
+    "ScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

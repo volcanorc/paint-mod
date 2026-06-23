@@ -8,9 +8,9 @@ The mod performs normal Minecraft client actions. It does not modify the server 
 ## Requirements
 
 - Minecraft Java Edition 1.21.1
-- Fabric Loader
-- Fabric API
-- Java 21
+- Fabric Loader 0.15.11 or newer
+- Fabric API 0.101.2+1.21.1 or newer for Minecraft 1.21.1
+- Java 21 or newer
 - A server using the Bukkit ArtMap plugin with its easel and canvas system
 
 ## Installation
@@ -21,6 +21,8 @@ The mod performs normal Minecraft client actions. It does not modify the server 
 4. Start Minecraft with the Fabric profile.
 5. Join a world or server and run `#painting paths` in chat.
 6. The command prints the exact image-import and calibration folders used by your launcher.
+
+The mod supports the full tested 1.21.1 range above. The latest compatible 1.21.1 Fabric Loader and Fabric API are recommended, but they are no longer unnecessarily required.
 
 ## Prepare an Image
 
@@ -109,6 +111,8 @@ Use a speed allowed by your server rules and connection quality.
 `#paint` is a shorter alias for `#painting`.
 All messages beginning with `#` are kept client-side. Invalid hash commands are blocked instead of being sent to server chat.
 
+While typing `#painting` or `#paint`, the foreground suggestion panel behaves like normal Minecraft command completion. Press **Tab** to cycle forward, **Shift+Tab** to cycle backward, use **Up/Down** to move through choices, or click a row. Placeholders such as `<ticks>` explain what to type but are never inserted as literal text.
+
 Finished canvases use Player Vault 2 by default (`/pv 2`). Change it with either `#painting pv 3` or the compact form `#painting pv3`; the choice is saved in the mod config and remains after restarting Minecraft.
 
 ## Calibration
@@ -150,4 +154,4 @@ gradle test
 gradle build
 ```
 
-The current source build is written to `build/libs/artmap-color-assistant-1.0.1.jar`.
+The current source build is written to `build/libs/artmap-color-assistant-1.0.2.jar`.

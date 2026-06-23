@@ -114,6 +114,109 @@ public final class CommandGuide {
             new Entry("bottom-left", "Set corner direction."),
             new Entry("bottom-right", "Set corner direction.")
     );
+    private static final List<Node> CHAT_ROOT = List.of(
+            leaf("help", "Show clickable help."),
+            leaf("gui", "Open client controls."),
+            leaf("paths", "Show import and calibration folders."),
+            branch("set", "Choose painting type.",
+                    leaf("manual", "Use assisted manual painting."),
+                    leaf("auto", "Use classic automatic painting."),
+                    leaf("smart", "Use Smart painting.")),
+            branch("android", "Android/Pojav diagnostics.",
+                    leaf("status", "Show Android/Pojav paths and runtime."),
+                    leaf("testinput", "Check cursor and touch capture.")),
+            argument("dryrun", "Analyze an image without painting.", "<file.png>"),
+            branch("palette", "Inspect color matching.",
+                    leaf("status", "Show loaded and usable colors."),
+                    leaf("reds", "List available red-ish colors."),
+                    argument("why", "Explain nearest colors for RGB.", "<hex>")),
+            branch("batch", "Paint a numbered image queue.",
+                    argument("start", "Start a numbered PNG batch.", "<first> <last> <nameSuffix>"),
+                    leaf("continue", "Start the next prepared batch image."),
+                    leaf("status", "Show batch progress."),
+                    leaf("stop", "Stop the batch queue.")),
+            branch("postpaint", "Control guarded post-paint automation.",
+                    leaf("on", "Enable post-paint automation."),
+                    leaf("off", "Disable post-paint automation."),
+                    leaf("status", "Show post-paint setup.")),
+            branch("rename", "Record the save GUI click point.",
+                    leaf("click", "Record a new save GUI click point."),
+                    leaf("clear", "Clear the save GUI click point.")),
+            argument("pv", "Choose the finished-canvas Player Vault.", "<1-40>"),
+            branch("pv2", "Select Player Vault 2; click and clear are legacy.",
+                    leaf("click", "Record the legacy vault click point."),
+                    leaf("clear", "Clear the legacy vault click point.")),
+            leaf("full", "Start the selected painting mode."),
+            branch("auto", "Automatic painting controls.",
+                    leaf("full", "Start the selected painting mode."),
+                    leaf("start", "Start automatic painting."),
+                    leaf("stop", "Stop automatic painting."),
+                    leaf("pause", "Pause automatic painting."),
+                    leaf("resume", "Resume automatic painting."),
+                    leaf("status", "Show automatic painting status."),
+                    argument("speed", "Set the automatic painting delay.", "<ticks>"),
+                    branch("drag", "Control same-color row dragging.",
+                            leaf("on", "Enable row dragging."),
+                            leaf("off", "Disable row dragging."),
+                            leaf("status", "Show row-dragging status."))),
+            branch("smart", "Smart hybrid painting controls.",
+                    leaf("on", "Enable Smart painting."),
+                    leaf("off", "Disable Smart painting."),
+                    leaf("status", "Show Smart painting status."),
+                    leaf("preview", "Preview the Smart route."),
+                    branch("basecoat", "Control the dominant-color base coat.",
+                            leaf("on", "Enable the Smart base coat."),
+                            leaf("off", "Disable the Smart base coat.")),
+                    argument("threshold", "Set the minimum bucket region.", "<number>"),
+                    argument("dragthreshold", "Set the minimum Smart drag run.", "<number>")),
+            branch("bucket", "Smart bucket timing and guard controls.",
+                    leaf("on", "Enable the guarded bucket action."),
+                    leaf("off", "Disable the guarded bucket action."),
+                    leaf("status", "Show bucket guard and timing."),
+                    leaf("preview", "Preview the prepared Smart route."),
+                    argument("selectdelay", "Set dominant-color selection delay.", "<ticks>"),
+                    argument("swapdelay", "Set hand-swap verification delay.", "<ticks>"),
+                    argument("aimdelay", "Set fill-anchor aim delay.", "<ticks>"),
+                    argument("afterdelay", "Set post-fill delay.", "<ticks>"),
+                    argument("restoredelay", "Set hand-restoration delay.", "<ticks>")),
+            branch("calibrate", "Exact calibration controls.",
+                    argument("start", "Start a fresh exact calibration.", "<name>"),
+                    argument("continue", "Continue a saved calibration.", "<name>"),
+                    argument("resume", "Reload and continue a saved calibration.", "<name>"),
+                    argument("save", "Save calibration progress.", "<name>"),
+                    argument("reset", "Delete a saved calibration.", "<name>"),
+                    leaf("stop", "Stop calibration recording."),
+                    leaf("undo", "Remove the last recorded point."),
+                    leaf("status", "Show calibration progress."),
+                    leaf("clear", "Clear calibration in memory.")),
+            branch("calibration", "Portable calibration mode.",
+                    branch("portable", "Control portable exact calibration.",
+                            leaf("on", "Enable portable calibration."),
+                            leaf("off", "Disable portable calibration."),
+                            leaf("status", "Show portable calibration status."))),
+            branch("cal", "Corner calibration and aim tests.",
+                    leaf("top-left", "Set the top-left corner direction."),
+                    leaf("top-right", "Set the top-right corner direction."),
+                    leaf("bottom-left", "Set the bottom-left corner direction."),
+                    leaf("bottom-right", "Set the bottom-right corner direction."),
+                    leaf("status", "Show calibration status."),
+                    leaf("clear", "Clear calibration in memory."),
+                    argument("test", "Aim at a calibrated pixel.", "<x> <y>")),
+            argument("usecalibration", "Load a saved exact calibration.", "<name>"),
+            leaf("status", "Show current painting status."),
+            leaf("stop", "Stop painting and active automation."),
+            leaf("pause", "Pause the current painting session."),
+            leaf("resume", "Resume the current painting session."),
+            leaf("back", "Move back one painting pixel."),
+            leaf("skip", "Skip the current painting pixel."),
+            leaf("reload", "Reload the client configuration."),
+            argument("goto", "Move to a pixel index or coordinate.", "<index> or <x> <y>"),
+            argument("pos", "Move to a canvas coordinate.", "<x> <y>"),
+            branch("confirm", "Control click confirmation mode.",
+                    leaf("on", "Enable confirmation mode."),
+                    leaf("off", "Disable confirmation mode.")),
+            hint("<file.png>", "Load an imported PNG by filename.")
+    );
 
     private CommandGuide() {
     }
@@ -166,70 +269,48 @@ public final class CommandGuide {
         return ROOT;
     }
 
-    public static List<Entry> chatSuggestions(String input) {
-        if (input == null) {
+    public static List<Completion> chatSuggestions(String input) {
+        PrefixInput parsed = PrefixInput.parse(input);
+        if (parsed == null) {
             return List.of();
         }
-        String trimmed = input.trim();
-        if (!trimmed.startsWith("#") || trimmed.startsWith("#/")) {
-            return List.of();
+        String rest = parsed.rest();
+        boolean trailingSpace = !rest.isEmpty() && Character.isWhitespace(rest.charAt(rest.length() - 1));
+        String normalized = rest.trim().toLowerCase(Locale.ROOT);
+        String[] tokens = normalized.isEmpty() ? new String[0] : normalized.split("\\s+");
+        int consumed = trailingSpace ? tokens.length : Math.max(0, tokens.length - 1);
+        String filter = trailingSpace || tokens.length == 0 ? "" : tokens[tokens.length - 1];
+        List<Node> level = CHAT_ROOT;
+        List<String> path = new java.util.ArrayList<>();
+        Node current = null;
+        for (int i = 0; i < consumed; i++) {
+            String token = tokens[i];
+            current = level.stream()
+                    .filter(node -> node.token().equals(token))
+                    .findFirst()
+                    .orElse(null);
+            if (current == null) {
+                return List.of();
+            }
+            path.add(current.token());
+            level = current.children();
         }
-        String lower = trimmed.toLowerCase(Locale.ROOT);
-        if (!lower.startsWith("#painting") && !lower.startsWith("#paint")) {
-            return "#painting".startsWith(lower) || "#paint".startsWith(lower)
-                    ? fullRoot("")
-                    : List.of();
+        if (trailingSpace && current != null && level.isEmpty()) {
+            return placeholderSuggestions(parsed.prefix(), path, current);
         }
-        String rest = commandRest(trimmed);
-        if (rest == null) {
-            return fullRoot("");
-        }
-        String normalized = rest.toLowerCase(Locale.ROOT);
-        if (normalized.startsWith("auto")) {
-            return prefixed("#painting auto ", AUTO, normalized.substring("auto".length()).trim());
-        }
-        if (normalized.startsWith("smart")) {
-            return prefixed("#painting smart ", SMART, normalized.substring("smart".length()).trim());
-        }
-        if (normalized.startsWith("bucket")) {
-            return prefixed("#painting bucket ", BUCKET, normalized.substring("bucket".length()).trim());
-        }
-        if (normalized.startsWith("palette")) {
-            return prefixed("#painting palette ", PALETTE, normalized.substring("palette".length()).trim());
-        }
-        if (normalized.startsWith("batch")) {
-            return prefixed("#painting batch ", BATCH, normalized.substring("batch".length()).trim());
-        }
-        if (normalized.startsWith("postpaint")) {
-            return prefixed("#painting postpaint ", POSTPAINT, normalized.substring("postpaint".length()).trim());
-        }
-        if (normalized.startsWith("rename")) {
-            return prefixed("#painting rename ", RENAME, normalized.substring("rename".length()).trim());
-        }
-        if (normalized.equals("pv2") || normalized.startsWith("pv2 ")) {
-            return prefixed("#painting pv2 ", PV2, normalized.substring("pv2".length()).trim());
-        }
-        if (normalized.equals("pv") || normalized.startsWith("pv ")) {
-            return prefixed("#painting pv ", PV, normalized.substring("pv".length()).trim());
-        }
-        if (normalized.startsWith("android")) {
-            return prefixed("#painting android ", ANDROID, normalized.substring("android".length()).trim());
-        }
-        if (normalized.startsWith("calibration")) {
-            return prefixed("#painting calibration ", CALIBRATION, normalized.substring("calibration".length()).trim());
-        }
-        if (normalized.startsWith("calibrate")) {
-            return prefixed("#painting calibrate ", CALIBRATE, normalized.substring("calibrate".length()).trim());
-        }
-        if (normalized.startsWith("cal")) {
-            return prefixed("#painting cal ", CAL, normalized.substring("cal".length()).trim());
-        }
-        return fullRoot(normalized.trim());
+        String pathPrefix = path.isEmpty() ? parsed.prefix() : parsed.prefix() + " " + String.join(" ", path);
+        return level.stream()
+                .filter(node -> filter.isBlank() || node.token().startsWith(filter))
+                .map(node -> completion(pathPrefix, node))
+                .toList();
     }
 
     public static String firstCompletion(String input) {
-        List<Entry> entries = chatSuggestions(input);
-        return entries.isEmpty() ? null : entries.getFirst().command();
+        return chatSuggestions(input).stream()
+                .filter(Completion::insertable)
+                .map(Completion::insertion)
+                .findFirst()
+                .orElse(null);
     }
 
     public static String commandRest(String input) {
@@ -246,10 +327,6 @@ public final class CommandGuide {
         return null;
     }
 
-    private static List<Entry> fullRoot(String filter) {
-        return prefixed("#painting ", ROOT, filter);
-    }
-
     private static List<Entry> prefixed(String prefix, List<Entry> entries, String filter) {
         String normalized = filter == null ? "" : filter.toLowerCase(Locale.ROOT);
         return entries.stream()
@@ -258,6 +335,79 @@ public final class CommandGuide {
                 .collect(Collectors.toList());
     }
 
+    private static Completion completion(String pathPrefix, Node node) {
+        String base = pathPrefix + " " + node.token();
+        String display = node.placeholders().isEmpty()
+                ? base
+                : base + " " + String.join(" | ", node.placeholders());
+        return new Completion(display, node.insertable() ? base : null, node.description());
+    }
+
+    private static List<Completion> placeholderSuggestions(String prefix, List<String> path, Node node) {
+        if (node.placeholders().isEmpty()) {
+            return List.of();
+        }
+        String base = prefix + " " + String.join(" ", path);
+        return node.placeholders().stream()
+                .map(placeholder -> new Completion(base + " " + placeholder, null, node.description()))
+                .toList();
+    }
+
+    private static Node leaf(String token, String description) {
+        return new Node(token, description, List.of(), List.of(), true);
+    }
+
+    private static Node branch(String token, String description, Node... children) {
+        return new Node(token, description, List.of(children), List.of(), true);
+    }
+
+    private static Node argument(String token, String description, String... placeholders) {
+        return new Node(token, description, List.of(), List.of(placeholders), true);
+    }
+
+    private static Node hint(String display, String description) {
+        return new Node(display, description, List.of(), List.of(), false);
+    }
+
     public record Entry(String command, String description) {
+    }
+
+    public record Completion(String display, String insertion, String description) {
+        public boolean insertable() {
+            return insertion != null && !insertion.isBlank();
+        }
+    }
+
+    private record Node(String token, String description, List<Node> children,
+                        List<String> placeholders, boolean insertable) {
+    }
+
+    private record PrefixInput(String prefix, String rest) {
+        private static PrefixInput parse(String input) {
+            if (input == null) {
+                return null;
+            }
+            String trimmed = input.stripLeading();
+            if (!trimmed.startsWith("#")) {
+                return null;
+            }
+            String prefix;
+            if (matchesPrefix(trimmed, "#painting")) {
+                prefix = "#painting";
+            } else if (matchesPrefix(trimmed, "#paint")) {
+                prefix = "#paint";
+            } else if ("#painting".startsWith(trimmed) || "#paint".startsWith(trimmed)) {
+                return new PrefixInput(trimmed.startsWith("#paint") ? "#paint" : "#painting", "");
+            } else {
+                return null;
+            }
+            return new PrefixInput(prefix, trimmed.substring(prefix.length()).stripLeading());
+        }
+
+        private static boolean matchesPrefix(String input, String prefix) {
+            return input.startsWith(prefix)
+                    && (input.length() == prefix.length()
+                    || Character.isWhitespace(input.charAt(prefix.length())));
+        }
     }
 }

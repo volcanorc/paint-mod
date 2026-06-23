@@ -9,8 +9,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(Element.class)
 public abstract class ScreenMixin {
-    @Inject(method = "mouseClicked(DDI)Z", at = @At("HEAD"))
+    @Inject(method = "mouseClicked(DDI)Z", at = @At("HEAD"), cancellable = true)
     private void artmapColorAssistant$recordGuiClick(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> cir) {
+        if ((Object) this instanceof LocalSuggestionMouseHandler handler
+                && handler.artmapColorAssistant$selectLocalSuggestion(mouseX, mouseY, button)) {
+            cir.setReturnValue(true);
+            return;
+        }
         ArtMapColorAssistantClient.recordGuiScreenClick(mouseX, mouseY, button);
     }
 }
