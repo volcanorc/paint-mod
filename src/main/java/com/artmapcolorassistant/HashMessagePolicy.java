@@ -3,6 +3,7 @@ package com.artmapcolorassistant;
 final class HashMessagePolicy {
     private static final String LONG_PREFIX = "#painting";
     private static final String SHORT_PREFIX = "#paint";
+    private static final String BOT_PREFIX = "#bot";
 
     private HashMessagePolicy() {
     }
@@ -13,6 +14,9 @@ final class HashMessagePolicy {
         }
         String trimmed = raw.trim();
         if (!trimmed.startsWith("#")) {
+            return Classification.NORMAL_CHAT;
+        }
+        if (matchesCommandPrefix(trimmed, BOT_PREFIX)) {
             return Classification.NORMAL_CHAT;
         }
         if (matchesCommandPrefix(trimmed, LONG_PREFIX) || matchesCommandPrefix(trimmed, SHORT_PREFIX)) {

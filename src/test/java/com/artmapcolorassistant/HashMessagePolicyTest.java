@@ -44,6 +44,21 @@ class HashMessagePolicyTest {
     }
 
     @Test
+    void allowsExactLowercaseBotPrefixForOtherLocalMods() {
+        assertEquals(NORMAL_CHAT, HashMessagePolicy.classify("#bot"));
+        assertEquals(NORMAL_CHAT, HashMessagePolicy.classify("#bot help"));
+        assertEquals(NORMAL_CHAT, HashMessagePolicy.classify("   #bot\tstatus   "));
+    }
+
+    @Test
+    void stillBlocksBotPrefixCollisionsAndCaseChanges() {
+        assertEquals(BLOCKED_HASH, HashMessagePolicy.classify("#botany"));
+        assertEquals(BLOCKED_HASH, HashMessagePolicy.classify("#bot#"));
+        assertEquals(BLOCKED_HASH, HashMessagePolicy.classify("#Bot"));
+        assertEquals(BLOCKED_HASH, HashMessagePolicy.classify("#botcmd"));
+    }
+
+    @Test
     void repeatedMistakesAreAlwaysBlocked() {
         for (int attempt = 0; attempt < 10; attempt++) {
             assertEquals(BLOCKED_HASH, HashMessagePolicy.classify("#cow"));

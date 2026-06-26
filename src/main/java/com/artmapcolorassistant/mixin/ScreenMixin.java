@@ -8,7 +8,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(Element.class)
-public abstract class ScreenMixin {
+public interface ScreenMixin {
     @Inject(method = "mouseClicked(DDI)Z", at = @At("HEAD"), cancellable = true)
     private void artmapColorAssistant$recordGuiClick(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> cir) {
         if ((Object) this instanceof LocalSuggestionMouseHandler handler
