@@ -1,6 +1,7 @@
 package com.artmapcolorassistant.mixin;
 
 import com.artmapcolorassistant.ArtMapColorAssistantClient;
+import com.artmapcolorassistant.LocalSuggestionMouseHandler;
 import net.minecraft.client.gui.Element;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;

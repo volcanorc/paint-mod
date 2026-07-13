@@ -149,7 +149,7 @@ Developers need Java 21 and Gradle 8.14.3:
 ```text
 git clone https://github.com/volcanorc/paint-mod.git
 cd paint-mod
-git switch SmartFeature
+git switch colorbranch
 gradle test
 gradle build
 ```

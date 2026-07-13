@@ -2,6 +2,7 @@ package com.artmapcolorassistant.mixin;
 
 import com.artmapcolorassistant.ArtMapColorAssistantClient;
 import com.artmapcolorassistant.CommandGuide;
+import com.artmapcolorassistant.LocalSuggestionMouseHandler;
 import com.artmapcolorassistant.LocalSuggestionSession;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
