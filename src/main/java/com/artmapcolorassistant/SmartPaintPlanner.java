@@ -24,8 +24,8 @@ public final class SmartPaintPlanner {
         ArtMapColor dominant = deepBlack.active() ? DeepBlackAnalyzer.findInkSac(config) : dominantNonBlankTargetColor(canvas);
         List<Integer> anchors = scriptedAnchors(canvas);
         String unavailable = baseCoatUnavailableReason(canvas, config, dominant);
-        if (unavailable == null && anchors.size() != 9) {
-            unavailable = "canvas is too small for nine unique bucket anchors";
+        if (unavailable == null && anchors.size() < SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS) {
+            unavailable = "canvas is too small for thirty natural bucket anchors";
         }
         if (unavailable == null && deepBlack.active() && DeepBlackAnalyzer.findCoal(config) == null) {
             unavailable = "deep-black Coal bucket is enabled but minecraft:coal is not configured";
@@ -252,27 +252,8 @@ public final class SmartPaintPlanner {
     }
 
     private List<Integer> scriptedAnchors(SmartCanvas canvas) {
-        if (canvas.width() < 3 || canvas.height() < 3) {
-            return List.of();
-        }
-        int centerX = Math.max(1, Math.min(canvas.width() - 2, (canvas.width() - 1) / 2));
-        int centerY = Math.max(1, Math.min(canvas.height() - 2, (canvas.height() - 1) / 2));
-        int[][] shuffledOffsets = {
-                {0, 0},
-                {1, 1},
-                {-1, 0},
-                {1, -1},
-                {0, 1},
-                {-1, -1},
-                {1, 0},
-                {-1, 1},
-                {0, -1}
-        };
-        ArrayList<Integer> anchors = new ArrayList<>(9);
-        for (int[] offset : shuffledOffsets) {
-            anchors.add(CanvasMath.toIndex(centerX + offset[0], centerY + offset[1], canvas.width()));
-        }
-        return List.copyOf(anchors);
+        List<Integer> natural = SmartBucketAnchorPlanner.naturalCandidates(canvas.width(), canvas.height());
+        return natural;
     }
 
     private SmartPreview preview(int oldTicks, int originalWrong, List<PaintAction> actions,

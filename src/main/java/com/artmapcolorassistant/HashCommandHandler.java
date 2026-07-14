@@ -24,12 +24,13 @@ public final class HashCommandHandler {
     private final CalibrationManager calibrationManager;
     private final BatchManager batchManager;
     private final GuiClickRecorder guiClickRecorder;
+    private final RecoveryStore recoveryStore;
     private boolean confirmMode;
 
     public HashCommandHandler(ConfigManager configManager, SessionController controller, AutoPainter autoPainter,
                               SmartPainter smartPainter,
                               CalibrationManager calibrationManager, BatchManager batchManager,
-                              GuiClickRecorder guiClickRecorder) {
+                              GuiClickRecorder guiClickRecorder, RecoveryStore recoveryStore) {
         this.configManager = configManager;
         this.controller = controller;
         this.autoPainter = autoPainter;
@@ -37,6 +38,7 @@ public final class HashCommandHandler {
         this.calibrationManager = calibrationManager;
         this.batchManager = batchManager;
         this.guiClickRecorder = guiClickRecorder;
+        this.recoveryStore = recoveryStore;
         this.confirmMode = configManager.config().confirmMode();
     }
 
@@ -104,11 +106,17 @@ public final class HashCommandHandler {
                     smartPainter.invalidateTrust("manual pause");
                     smartPainter.pause(sink);
                 }
+                autoPainter.pause(sink);
                 controller.pause(sink);
             }
             case "resume" -> {
+                boolean liveResumeTarget = controller.session() != null || autoPainter.paused() || smartPainter.paused();
                 smartPainter.resume(sink);
-                controller.resume(sink);
+                autoPainter.resume(sink);
+                boolean sessionResumed = controller.resume(sink);
+                if (!liveResumeTarget && !sessionResumed) {
+                    persistentResume(sink);
+                }
             }
             case "back" -> {
                 if (smartPainter.running()) {
@@ -148,6 +156,7 @@ public final class HashCommandHandler {
             case "coalblack" -> handleCoalBlack(parts, sink);
             case "palette" -> handlePalette(parts, sink);
             case "batch" -> handleBatch(parts, sink);
+            case "recovery" -> handleRecovery(parts, sink);
             case "postpaint" -> handlePostPaint(parts, sink);
             case "rename" -> handleRename(parts, sink);
             case "pv" -> handlePlayerVault(parts, sink);
@@ -357,6 +366,9 @@ public final class HashCommandHandler {
             case SMART -> {
                 sink.info(readiness("smart on", config.smartEnabled()));
                 sink.info(readiness("bucket on", config.bucketEnabled()));
+                sink.info(readiness("bucket natural movement required"
+                        + " delay " + config.bucketNaturalDelayMinTicks() + "-" + config.bucketNaturalDelayMaxTicks() + " ticks",
+                        true));
                 sink.info(readiness("offhand empty bucket", controller.exactEmptyBucketInOffhand()));
                 sink.info(readiness("basecoat on", config.smartBaseCoatEnabled()));
                 sink.info(readiness("coal black bucket " + (config.smartCoalBlackBasecoatEnabled() ? "on" : "off")
@@ -516,6 +528,61 @@ public final class HashCommandHandler {
             case "stop" -> batchManager.stop(sink);
             default -> sink.error("Usage: #painting batch start <first> <last> <nameSuffix>|continue|status|stop");
         }
+    }
+
+    private void handleRecovery(String[] parts, SessionController.MessageSink sink) {
+        if (recoveryStore == null) {
+            sink.error("Recovery storage is not available.");
+            return;
+        }
+        if (parts.length < 2) {
+            sink.error("Usage: #painting recovery status|clear");
+            return;
+        }
+        switch (parts[1].toLowerCase(Locale.ROOT)) {
+            case "status" -> recoveryStore.load()
+                    .ifPresentOrElse(progress -> {
+                        RecoveryStore.Validation validation = recoveryStore.validate(progress);
+                        sink.info(recoveryStore.describe(progress));
+                        sink.info(validation.accepted() ? "Recovery PNG check: unchanged." : "Recovery PNG check: " + validation.message());
+                    }, () -> sink.info("No recovery checkpoint is saved."));
+            case "clear" -> {
+                recoveryStore.clear(text -> sink.error(text));
+                sink.info("Painting recovery checkpoint cleared.");
+            }
+            default -> sink.error("Usage: #painting recovery status|clear");
+        }
+    }
+
+    private void persistentResume(SessionController.MessageSink sink) {
+        if (recoveryStore == null) {
+            sink.error("No active painting session.");
+            return;
+        }
+        var saved = recoveryStore.load();
+        if (saved.isEmpty()) {
+            sink.error("No active painting session and no saved recovery checkpoint.");
+            return;
+        }
+        RecoveryProgress progress = saved.get();
+        RecoveryStore.Validation validation = recoveryStore.validate(progress);
+        if (!validation.accepted()) {
+            sink.error(validation.message());
+            sink.info("Run #painting recovery status for details, #painting recovery clear to discard it, or start a new batch.");
+            return;
+        }
+        if (progress.smartBucketInFlight()) {
+            sink.error("Recovery is blocked because Smart bucket/Coal darkening was in progress. "
+                    + "To avoid double bucket clicks, inspect the canvas and start a new batch or run #painting recovery clear.");
+            return;
+        }
+        batchManager.restore(progress, sink);
+        smartPainter.recoverActionBoundary(progress.smartActionBoundary());
+        if (!controller.restore(progress, sink)) {
+            batchManager.restore(null, sink);
+            return;
+        }
+        sink.info("Resume restored the saved checkpoint only. Start Auto/Smart when ready; it will not click automatically.");
     }
 
     private void handlePalette(String[] parts, SessionController.MessageSink sink) {
@@ -904,11 +971,13 @@ public final class HashCommandHandler {
 
     private void handleBucket(String[] parts, SessionController.MessageSink sink) {
         if (parts.length < 2) {
-            sink.error("Usage: #painting bucket on|off|status|preview|selectdelay|swapdelay|aimdelay|afterdelay|restoredelay <ticks>");
+            sink.error("Usage: #painting bucket on|off|status|preview|natural on|off|status|delay <minTicks> <maxTicks>|selectdelay|swapdelay|aimdelay|afterdelay|restoredelay <ticks>");
             return;
         }
         String bucketCommand = parts[1].toLowerCase(Locale.ROOT);
-        if (!bucketCommand.equals("status") && !configManager.config().paintingMode().allowsBucketConfig()) {
+        boolean statusOnly = bucketCommand.equals("status")
+                || (bucketCommand.equals("natural") && parts.length >= 3 && parts[2].equalsIgnoreCase("status"));
+        if (!statusOnly && !configManager.config().paintingMode().allowsBucketConfig()) {
             sink.error("Bucket only works in painting type smart. Run #painting set smart first.");
             return;
         }
@@ -929,7 +998,45 @@ public final class HashCommandHandler {
             case "aimdelay" -> handleBucketNumber(parts, "aimdelay", sink);
             case "afterdelay" -> handleBucketNumber(parts, "afterdelay", sink);
             case "restoredelay" -> handleBucketNumber(parts, "restoredelay", sink);
-            default -> sink.error("Usage: #painting bucket on|off|status|preview|selectdelay|swapdelay|aimdelay|afterdelay|restoredelay <ticks>");
+            case "natural" -> handleBucketNatural(parts, sink);
+            default -> sink.error("Usage: #painting bucket on|off|status|preview|natural on|off|status|delay <minTicks> <maxTicks>|selectdelay|swapdelay|aimdelay|afterdelay|restoredelay <ticks>");
+        }
+    }
+
+    private void handleBucketNatural(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length < 3) {
+            sink.error("Usage: #painting bucket natural on|off|status|delay <minTicks> <maxTicks>");
+            return;
+        }
+        ConfigManager.Config config = configManager.config();
+        switch (parts[2].toLowerCase(Locale.ROOT)) {
+            case "on" -> {
+                configManager.setBucketNaturalMovementEnabled(true, text -> sink.error(text.getString()));
+                sink.info("Smart bucket natural movement is required and enabled. Bucket stages use shuffled calibrated aim points.");
+            }
+            case "off" -> sink.error("Smart bucket natural movement is required for bucket/Coal safety and cannot be disabled.");
+            case "status" -> sink.info("Bucket natural movement=" + config.bucketNaturalMovementEnabled()
+                    + " delayRange=" + config.bucketNaturalDelayMinTicks() + "-" + config.bucketNaturalDelayMaxTicks()
+                    + " ticks (required; 20 ticks is about one second).");
+            case "delay" -> {
+                if (parts.length != 5) {
+                    sink.error("Usage: #painting bucket natural delay <minTicks> <maxTicks>");
+                    return;
+                }
+                try {
+                    int min = Integer.parseInt(parts[3]);
+                    int max = Integer.parseInt(parts[4]);
+                    if (min < 0 || max < min) {
+                        sink.error("Bucket natural delay needs 0 <= minTicks <= maxTicks.");
+                        return;
+                    }
+                    configManager.setBucketNaturalDelayRange(min, max, text -> sink.error(text.getString()));
+                    sink.info("Bucket natural delay range saved: " + min + "-" + max + " ticks.");
+                } catch (NumberFormatException e) {
+                    sink.error("Bucket natural delay values must be numbers.");
+                }
+            }
+            default -> sink.error("Usage: #painting bucket natural on|off|status|delay <minTicks> <maxTicks>");
         }
     }
 
@@ -964,6 +1071,8 @@ public final class HashCommandHandler {
                 + " fillAimSettle=" + config.bucketFillAimSettleTicks()
                 + " postFillDelay=" + config.bucketPostFillDelayTicks()
                 + " handRestoreDelay=" + config.bucketHandRestoreDelayTicks()
+                + " naturalMovement=" + config.bucketNaturalMovementEnabled()
+                + " naturalDelayRange=" + config.bucketNaturalDelayMinTicks() + "-" + config.bucketNaturalDelayMaxTicks()
                 + " offhandExactEmptyBucket=" + controller.exactEmptyBucketInOffhand() + ".");
     }
 
@@ -1003,7 +1112,7 @@ public final class HashCommandHandler {
     }
 
     private void usage(SessionController.MessageSink sink) {
-        sink.info("Usage: #painting help, gui, <file.png>, dryrun, palette ..., coalblack ..., batch ..., postpaint ..., rename ..., pv <1-40>, pv2 ..., auto full, stop, pause, resume, back, skip, goto, calibrate ..., usecalibration <name>, cal ...");
+        sink.info("Usage: #painting help, gui, <file.png>, dryrun, palette ..., coalblack ..., batch ..., recovery ..., postpaint ..., rename ..., pv <1-40>, pv2 ..., auto full, stop, pause, resume, back, skip, goto, calibrate ..., usecalibration <name>, cal ...");
     }
 
     private void openGui(SessionController.MessageSink sink) {
@@ -1044,6 +1153,9 @@ public final class HashCommandHandler {
         }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting batch")) {
             helpLine(sink, "#painting batch " + entry.command(), entry.description());
+        }
+        for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting recovery")) {
+            helpLine(sink, "#painting recovery " + entry.command(), entry.description());
         }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting postpaint")) {
             helpLine(sink, "#painting postpaint " + entry.command(), entry.description());

@@ -37,6 +37,7 @@ public final class BatchManager {
             return;
         }
         stopSilently();
+        controller.clearRecovery(sink);
         this.active = true;
         this.paintingActive = false;
         this.waitingForSetup = false;
@@ -44,6 +45,7 @@ public final class BatchManager {
         this.last = last;
         this.current = first;
         this.nameSuffix = suffix == null ? "" : suffix.trim();
+        controller.setRecoveryBatchSnapshot(snapshot());
         sink.info("Batch started: " + first + ".png to " + last + ".png suffix=\"" + this.nameSuffix + "\".");
         startCurrent(sink);
     }
@@ -65,14 +67,18 @@ public final class BatchManager {
             sink.info("Batch complete. Painted " + first + ".png through " + last + ".png.");
             active = false;
             waitingForSetup = false;
+            controller.setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot.none());
+            controller.clearRecovery(sink);
             return;
         }
         waitingForSetup = false;
+        controller.setRecoveryBatchSnapshot(snapshot());
         startCurrent(sink);
     }
 
     public void stop(SessionController.MessageSink sink) {
         stopSilently();
+        controller.clearRecovery(sink);
         sink.info("Batch stopped.");
     }
 
@@ -123,6 +129,8 @@ public final class BatchManager {
             waitingForSetup = false;
             int completedNumber = current;
             current++;
+            controller.setRecoveryBatchSnapshot(snapshot());
+            controller.saveRecovery(true, "post-paint automation starting", sink);
             postPaintWorkflow.start(completedNumber, nameSuffix, sink);
             return;
         }
@@ -131,10 +139,14 @@ public final class BatchManager {
         if (current > last) {
             active = false;
             waitingForSetup = false;
+            controller.setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot.none());
+            controller.clearRecovery(sink);
             sink.info("Painting " + completedFilename + " complete. Save as \"" + saveName
                     + "\", store it, and the batch is complete.");
             return;
         }
+        controller.setRecoveryBatchSnapshot(snapshot());
+        controller.saveRecovery(true, "batch waiting for next setup", sink);
         sink.info("Painting " + completedFilename + " complete. Save as \"" + saveName
                 + "\", store it, place the next blank canvas, enter painting mode, then run #painting batch continue.");
     }
@@ -155,10 +167,12 @@ public final class BatchManager {
         }
         String filename = nextFilename();
         activeFilename = filename;
+        controller.setRecoveryBatchSnapshot(snapshot());
         boolean started = controller.start(filename, sink);
         if (!started || controller.session() == null) {
             paintingActive = false;
             waitingForSetup = true;
+            controller.setRecoveryBatchSnapshot(snapshot());
             sink.error("Batch could not start " + filename + ". Fix the issue, then run #painting batch continue.");
             return;
         }
@@ -170,12 +184,16 @@ public final class BatchManager {
             if (!paintStarted) {
                 paintingActive = false;
                 waitingForSetup = true;
+                controller.setRecoveryBatchSnapshot(snapshot());
+                controller.saveRecovery(true, "batch loaded but painter did not start", sink);
                 sink.error("Batch loaded " + filename + " but auto paint did not start. Fix setup, then run #painting batch continue.");
                 return;
             }
         }
         paintingActive = true;
         waitingForSetup = false;
+        controller.setRecoveryBatchSnapshot(snapshot());
+        controller.saveRecovery(true, null, sink);
     }
 
     private boolean startConfiguredPainter(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -204,15 +222,41 @@ public final class BatchManager {
             if (current > last) {
                 active = false;
                 waitingForSetup = false;
+                controller.setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot.none());
+                controller.clearRecovery(sink);
                 sink.info("Batch complete. Painted " + first + ".png through " + last + ".png.");
                 return;
             }
             waitingForSetup = false;
+            controller.setRecoveryBatchSnapshot(snapshot());
             startCurrent(sink);
         } else if (result == PostPaintWorkflow.Result.FAILED) {
             waitingForSetup = true;
+            controller.setRecoveryBatchSnapshot(snapshot());
+            controller.saveRecovery(true, "post-paint automation paused", sink);
             sink.error("Post-paint automation paused. Fix the issue or finish setup manually, then run #painting batch continue.");
         }
+    }
+
+    public void restore(RecoveryProgress progress, SessionController.MessageSink sink) {
+        if (progress == null || !progress.hasBatch()) {
+            active = false;
+            paintingActive = false;
+            waitingForSetup = false;
+            controller.setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot.none());
+            return;
+        }
+        active = true;
+        paintingActive = true;
+        waitingForSetup = false;
+        first = progress.batchFirst();
+        last = progress.batchLast();
+        current = progress.batchCurrent();
+        nameSuffix = progress.batchSuffix();
+        activeFilename = progress.filename();
+        controller.setRecoveryBatchSnapshot(snapshot());
+        sink.info("Recovered batch " + first + ".png to " + last + ".png at " + activeFilename
+                + " suffix=\"" + nameSuffix + "\".");
     }
 
     private String nextFilename() {
@@ -233,5 +277,13 @@ public final class BatchManager {
         current = 0;
         activeFilename = null;
         nameSuffix = "";
+        controller.setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot.none());
+    }
+
+    private RecoveryProgress.BatchSnapshot snapshot() {
+        if (!active) {
+            return RecoveryProgress.BatchSnapshot.none();
+        }
+        return new RecoveryProgress.BatchSnapshot(true, first, last, current, nameSuffix);
     }
 }

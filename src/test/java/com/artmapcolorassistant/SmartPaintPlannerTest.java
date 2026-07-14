@@ -179,21 +179,17 @@ class SmartPaintPlannerTest {
     }
 
     @Test
-    void bucketPlanContainsNineUniqueNearCenterAnchors() {
+    void bucketPlanContainsThirtyUniqueInnerCanvasAnchors() {
         PreparedSmartPlan plan = new SmartPaintPlanner().prepare(
                 sessionWith(index -> index < 700 ? RED : BLUE), CONFIG);
 
-        assertEquals(9, plan.bucketAimAnchors().size());
-        assertEquals(9, new HashSet<>(plan.bucketAimAnchors()).size());
-        int centerX = (CONFIG.canvasWidth() - 1) / 2;
-        int centerY = (CONFIG.canvasHeight() - 1) / 2;
+        assertEquals(30, plan.bucketAimAnchors().size());
+        assertEquals(30, new HashSet<>(plan.bucketAimAnchors()).size());
         for (int index : plan.bucketAimAnchors()) {
             int x = CanvasMath.toX(index, CONFIG.canvasWidth());
             int y = CanvasMath.toY(index, CONFIG.canvasWidth());
-            assertTrue(x >= 0 && x < CONFIG.canvasWidth());
-            assertTrue(y >= 0 && y < CONFIG.canvasHeight());
-            assertTrue(Math.abs(x - centerX) <= 1);
-            assertTrue(Math.abs(y - centerY) <= 1);
+            assertTrue(x >= 2 && x <= CONFIG.canvasWidth() - 3);
+            assertTrue(y >= 2 && y <= CONFIG.canvasHeight() - 3);
         }
     }
 

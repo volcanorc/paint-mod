@@ -16,6 +16,11 @@ public final class ActionCostModel {
     }
 
     public static int bucket(ConfigManager.Config config) {
+        if (config.bucketNaturalMovementEnabled()) {
+            int average = (Math.max(0, config.bucketNaturalDelayMinTicks())
+                    + Math.max(config.bucketNaturalDelayMinTicks(), config.bucketNaturalDelayMaxTicks())) / 2;
+            return average * 6 + 1;
+        }
         return config.bucketColorSelectDelayTicks()
                 + config.bucketHandSwapDelayTicks()
                 + config.bucketFillAimSettleTicks()

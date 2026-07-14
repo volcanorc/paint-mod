@@ -1,6 +1,7 @@
 package com.artmapcolorassistant;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.minecraft.client.MinecraftClient;
@@ -17,6 +18,7 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
     private static ArtMapColorAssistantClient instance;
 
     private ConfigManager configManager;
+    private RecoveryStore recoveryStore;
     private SessionController controller;
     private CalibrationManager calibrationManager;
     private CalibrationMarkerRenderer calibrationMarkerRenderer;
@@ -36,9 +38,10 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         MinecraftClient client = MinecraftClient.getInstance();
         configManager = new ConfigManager();
         configManager.load(this::sendError);
+        recoveryStore = new RecoveryStore(configManager.progressPath(), configManager.importsPath());
 
         InventoryHelper inventoryHelper = new InventoryHelper(client);
-        controller = new SessionController(configManager, new ImageLoader(), inventoryHelper, new ColorMatcher());
+        controller = new SessionController(configManager, new ImageLoader(), inventoryHelper, new ColorMatcher(), recoveryStore);
         calibrationManager = new CalibrationManager(client, configManager.calibrationsPath());
         calibrationManager.setLastCalibrationName(configManager.config().selectedCalibrationName());
         calibrationMarkerRenderer = new CalibrationMarkerRenderer(client, calibrationManager);
@@ -48,7 +51,8 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         postPaintWorkflow = new PostPaintWorkflow(client, calibrationManager);
         batchManager = new BatchManager(configManager, controller, autoPainter, smartPainter, calibrationManager, postPaintWorkflow);
         guiClickRecorder = new GuiClickRecorder(client, configManager);
-        commandHandler = new HashCommandHandler(configManager, controller, autoPainter, smartPainter, calibrationManager, batchManager, guiClickRecorder);
+        commandHandler = new HashCommandHandler(configManager, controller, autoPainter, smartPainter,
+                calibrationManager, batchManager, guiClickRecorder, recoveryStore);
         clickTracker = new ClickTracker(client);
         keybindHandler = new KeybindHandler();
         keybindHandler.register();
@@ -56,6 +60,8 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
         ClientSendMessageEvents.ALLOW_CHAT.register(message -> !handleLocalHashMessage(message));
 
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
+        ClientLifecycleEvents.CLIENT_STOPPING.register(clientInstance ->
+                recoveryStore.flushNow(text -> sendError(text)));
         new HudOverlay(client, controller, autoPainter, calibrationManager, calibrationMarkerRenderer).register();
         LOGGER.info("ArtMapColorAssistant initialized");
     }
@@ -103,6 +109,7 @@ public final class ArtMapColorAssistantClient implements ClientModInitializer {
             autoPainter.tick(configManager.config(), sink);
         }
         batchManager.tick(sink);
+        recoveryStore.flushDue(text -> sink.error(text));
         keybindHandler.tick(controller, autoPainter, calibrationManager, calibrationMarkerRenderer, sink);
         clickTracker.tick(configManager.config(), commandHandler.confirmMode(), controller, calibrationManager, guiClickRecorder, smartPainter, sink);
     }

@@ -50,9 +50,9 @@ class CommandGuideTest {
     @Test
     void rootCompletionsCoverEveryImplementedNamedRootCommand() {
         Set<String> expected = Set.of("help", "gui", "paths", "set", "android", "dryrun", "palette", "batch",
-                "postpaint", "rename", "pv", "pv2", "full", "auto", "smart", "bucket", "coalblack", "calibrate",
-                "calibration", "cal", "usecalibration", "status", "stop", "pause", "resume", "back", "skip",
-                "reload", "goto", "pos", "confirm");
+                "recovery", "postpaint", "rename", "pv", "pv2", "full", "auto", "smart", "bucket", "coalblack",
+                "calibrate", "calibration", "cal", "usecalibration", "status", "stop", "pause", "resume",
+                "back", "skip", "reload", "goto", "pos", "confirm");
         Set<String> actual = CommandGuide.chatSuggestions("#painting ").stream()
                 .filter(CommandGuide.Completion::insertable)
                 .map(CommandGuide.Completion::insertion)
@@ -67,6 +67,7 @@ class CommandGuideTest {
         assertInsertions("#painting android ", "status", "testinput");
         assertInsertions("#painting palette ", "status", "reds", "why");
         assertInsertions("#painting batch ", "start", "continue", "status", "stop");
+        assertInsertions("#painting recovery ", "status", "clear");
         assertInsertions("#painting postpaint ", "on", "off", "status");
         assertInsertions("#painting rename ", "click", "clear");
         assertInsertions("#painting pv2 ", "click", "clear");
@@ -74,7 +75,8 @@ class CommandGuideTest {
         assertInsertions("#painting smart ", "on", "off", "status", "preview", "basecoat", "threshold", "dragthreshold");
         assertInsertions("#painting smart basecoat ", "on", "off");
         assertInsertions("#painting bucket ", "on", "off", "status", "preview", "selectdelay", "swapdelay",
-                "aimdelay", "afterdelay", "restoredelay");
+                "aimdelay", "afterdelay", "restoredelay", "natural");
+        assertInsertions("#painting bucket natural ", "on", "off", "status", "delay");
         assertInsertions("#painting coalblack ", "on", "off", "status", "passes");
         assertInsertions("#painting calibrate ", "start", "continue", "resume", "save", "reset", "stop", "undo",
                 "status", "clear");
@@ -89,7 +91,8 @@ class CommandGuideTest {
     void argumentPromptsNeverBecomeLiteralCompletions() {
         for (String input : Set.of("#painting dryrun ", "#painting palette why ", "#painting batch start ",
                 "#painting pv ", "#painting auto speed ", "#painting smart threshold ",
-                "#painting bucket aimdelay ", "#painting coalblack passes ", "#painting calibrate start ", "#painting cal test ",
+                "#painting bucket aimdelay ", "#painting bucket natural delay ", "#painting coalblack passes ",
+                "#painting calibrate start ", "#painting cal test ",
                 "#painting usecalibration ", "#painting goto ", "#painting pos ")) {
             assertFalse(CommandGuide.chatSuggestions(input).isEmpty(), input);
             assertTrue(CommandGuide.chatSuggestions(input).stream().noneMatch(CommandGuide.Completion::insertable), input);

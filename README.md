@@ -54,6 +54,7 @@ It follows the image from the top-left pixel to the bottom-right pixel and can d
 Smart mode prepares an efficient plan before painting.
 It can apply one bucket base coat using the most common nonblank color, then paint the remaining connected colors as calibrated drag paths.
 Smart mode requires a suitable exact calibration, the needed paint items, and an empty bucket in the offhand.
+Smart bucket and Coal darkening actions use shuffled calibrated look points plus randomized delays by default, while still sending only one guarded bucket click per fill action.
 
 ## Quick Start
 
@@ -104,7 +105,10 @@ Use a speed allowed by your server rules and connection quality.
 | `#painting auto speed <ticks>` | Change the normal auto-paint delay. |
 | `#painting status` | Show the current session and painting state. |
 | `#painting stop` | Stop the current painting session and automation. |
+| `#painting resume` | Resume a live pause, or restore the saved local recovery checkpoint. |
+| `#painting recovery status` | Check saved interrupted painting/batch progress. |
 | `#painting batch start 1 10 Dragon` | Paint numbered files `1.png` through `10.png`. |
+| `#painting bucket natural status` | Show shuffled Smart bucket movement and delay settings. |
 | `#painting pv 3` | Permanently store finished canvases in Player Vault 3 (valid range: 1-40). |
 | `#painting help` | Show clickable command help inside Minecraft. |
 
@@ -129,6 +133,8 @@ See the full guide for the exact steps.
 Batch mode uses numbered PNG files such as `1.png`, `2.png`, and `3.png`.
 It is available in Auto and Smart modes.
 Without post-paint automation, the mod pauses between canvases so you can save the finished art, store it, place the next blank canvas, and continue safely.
+
+Interrupted Auto/Smart batches save a lightweight local checkpoint in `artmap_color_assistant/progress.json`. If Minecraft closes or painting pauses from an error, reopen the game and run `#painting resume`; the mod restores the saved file/batch position but waits for you to start Auto/Smart again.
 
 ## Safety
 

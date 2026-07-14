@@ -15,6 +15,7 @@ public final class CommandGuide {
             new Entry("dryrun <file.png>", "Analyze without painting."),
             new Entry("palette", "Inspect color matching."),
             new Entry("batch", "Paint numbered image queue."),
+            new Entry("recovery", "Resume/check saved interrupted progress."),
             new Entry("postpaint", "Post-paint save/vault setup."),
             new Entry("rename", "Record save GUI click."),
             new Entry("pv <1-40>", "Choose the finished-canvas Player Vault."),
@@ -58,7 +59,9 @@ public final class CommandGuide {
             new Entry("swapdelay <ticks>", "Set hand-swap verification delay."),
             new Entry("aimdelay <ticks>", "Set fill-anchor aim delay."),
             new Entry("afterdelay <ticks>", "Set post-fill delay."),
-            new Entry("restoredelay <ticks>", "Set hand-restoration delay.")
+            new Entry("restoredelay <ticks>", "Set hand-restoration delay."),
+            new Entry("natural on|off|status", "Control shuffled calibrated bucket movement."),
+            new Entry("natural delay <minTicks> <maxTicks>", "Set randomized bucket delay range.")
     );
     private static final List<Entry> COALBLACK = List.of(
             new Entry("on", "Enable Ink Sac plus Coal deep-black bucket passes."),
@@ -76,6 +79,10 @@ public final class CommandGuide {
             new Entry("continue", "Start next batch image after setup."),
             new Entry("status", "Show batch progress."),
             new Entry("stop", "Stop batch queue.")
+    );
+    private static final List<Entry> RECOVERY = List.of(
+            new Entry("status", "Show saved interrupted painting progress."),
+            new Entry("clear", "Discard saved recovery progress.")
     );
     private static final List<Entry> POSTPAINT = List.of(
             new Entry("on", "Enable guarded post-paint automation."),
@@ -142,6 +149,9 @@ public final class CommandGuide {
                     leaf("continue", "Start the next prepared batch image."),
                     leaf("status", "Show batch progress."),
                     leaf("stop", "Stop the batch queue.")),
+            branch("recovery", "Resume/check interrupted painting progress.",
+                    leaf("status", "Show saved interrupted painting progress."),
+                    leaf("clear", "Discard saved recovery progress.")),
             branch("postpaint", "Control guarded post-paint automation.",
                     leaf("on", "Enable post-paint automation."),
                     leaf("off", "Disable post-paint automation."),
@@ -185,7 +195,12 @@ public final class CommandGuide {
                     argument("swapdelay", "Set hand-swap verification delay.", "<ticks>"),
                     argument("aimdelay", "Set fill-anchor aim delay.", "<ticks>"),
                     argument("afterdelay", "Set post-fill delay.", "<ticks>"),
-                    argument("restoredelay", "Set hand-restoration delay.", "<ticks>")),
+                    argument("restoredelay", "Set hand-restoration delay.", "<ticks>"),
+                    branch("natural", "Control shuffled calibrated bucket movement.",
+                            leaf("on", "Enable natural bucket movement."),
+                            leaf("off", "Disable natural bucket movement."),
+                            leaf("status", "Show natural bucket settings."),
+                            argument("delay", "Set randomized bucket delays.", "<minTicks> <maxTicks>"))),
             branch("coalblack", "Smart Ink Sac plus Coal deep-black controls.",
                     leaf("on", "Enable Coal deep-black bucket passes."),
                     leaf("off", "Disable Coal deep-black bucket passes."),
@@ -256,6 +271,9 @@ public final class CommandGuide {
         }
         if (lower.startsWith("batch")) {
             return BATCH;
+        }
+        if (lower.startsWith("recovery")) {
+            return RECOVERY;
         }
         if (lower.startsWith("postpaint")) {
             return POSTPAINT;

@@ -15,14 +15,22 @@ public final class SessionController {
     private final ImageLoader imageLoader;
     private final InventoryHelper inventoryHelper;
     private final ColorMatcher colorMatcher;
+    private final RecoveryStore recoveryStore;
     private PaintSession session;
     private int switchDelayTicks = -1;
+    private RecoveryProgress.BatchSnapshot recoveryBatchSnapshot = RecoveryProgress.BatchSnapshot.none();
 
     public SessionController(ConfigManager configManager, ImageLoader imageLoader, InventoryHelper inventoryHelper, ColorMatcher colorMatcher) {
+        this(configManager, imageLoader, inventoryHelper, colorMatcher, null);
+    }
+
+    public SessionController(ConfigManager configManager, ImageLoader imageLoader, InventoryHelper inventoryHelper,
+                             ColorMatcher colorMatcher, RecoveryStore recoveryStore) {
         this.configManager = configManager;
         this.imageLoader = imageLoader;
         this.inventoryHelper = inventoryHelper;
         this.colorMatcher = colorMatcher;
+        this.recoveryStore = recoveryStore;
     }
 
     public PaintSession session() {
@@ -37,7 +45,35 @@ public final class SessionController {
         return inventoryHelper.hasPendingSwap();
     }
 
+    public void setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot snapshot) {
+        recoveryBatchSnapshot = snapshot == null ? RecoveryProgress.BatchSnapshot.none() : snapshot;
+    }
+
     public boolean start(String filename, MessageSink sink) {
+        return startAt(filename, 0, sink, true);
+    }
+
+    public boolean restore(RecoveryProgress progress, MessageSink sink) {
+        if (progress == null) {
+            sink.error("No painting recovery checkpoint is saved.");
+            return false;
+        }
+        if (progress.smartBucketInFlight()) {
+            sink.error("Recovery is blocked because Smart bucket/Coal darkening was in progress. "
+                    + "To avoid double bucket clicks, inspect the canvas and start a new batch or run #painting recovery clear.");
+            return false;
+        }
+        configManager.setPaintingMode(progress.paintingMode(), text -> sink.error(text.getString()));
+        boolean restored = startAt(progress.filename(), progress.currentIndex(), sink, false);
+        if (restored) {
+            sink.info("Recovered " + progress.filename() + " at index " + (session.currentIndex() + 1)
+                    + "/" + session.steps().size() + ". Start Auto/Smart again when ready.");
+            saveRecovery(true, "recovered checkpoint", progress.smartActionBoundary(), false, sink);
+        }
+        return restored;
+    }
+
+    private boolean startAt(String filename, int index, MessageSink sink, boolean saveProgress) {
         try {
             ConfigManager.Config config = configManager.config();
             ImageLoader.LoadedImage image = imageLoader.load(configManager.importsPath(), filename, config.canvasWidth(), config.canvasHeight());
@@ -45,8 +81,19 @@ public final class SessionController {
             List<ArtMapColor> palette = colorMatcher.buildMatchingPalette(config, inventory);
             List<PaintStep> steps = colorMatcher.convert(image, config, palette);
             session = new PaintSession(filename, steps, palette);
+            if (index < 0 || index >= steps.size()) {
+                sink.error("Saved recovery index is out of range for " + filename + ".");
+                session = null;
+                return false;
+            }
+            if (index > 0) {
+                session.gotoIndex(index);
+            }
             sink.info("Started " + filename + " with " + steps.size() + " steps and " + palette.size() + " usable colors.");
             switchCurrentNow(sink);
+            if (saveProgress) {
+                saveRecovery(true, null, sink);
+            }
             return true;
         } catch (ImageLoader.ImageLoadException | ColorMatcher.MatchException e) {
             sink.error(e.getMessage());
@@ -152,22 +199,27 @@ public final class SessionController {
             session.stop();
             session = null;
         }
+        clearRecovery(sink);
         sink.info("Painting stopped.");
     }
 
     public void pause(MessageSink sink) {
         if (session != null) {
             session.pause();
+            saveRecovery(true, "paused", sink);
             sink.info("Painting paused.");
         }
     }
 
-    public void resume(MessageSink sink) {
+    public boolean resume(MessageSink sink) {
         if (session != null) {
             session.resume();
             sink.info("Painting resumed.");
             switchCurrentNow(sink);
+            saveRecovery(true, null, sink);
+            return true;
         }
+        return false;
     }
 
     public void back(MessageSink sink) {
@@ -178,6 +230,7 @@ public final class SessionController {
         session.back();
         sink.info("Moved back to " + describeCurrent());
         switchCurrentNow(sink);
+        saveRecovery(true, null, sink);
     }
 
     public void skip(MessageSink sink) {
@@ -191,6 +244,7 @@ public final class SessionController {
         }
         sink.info("Skipped to " + describeCurrent());
         switchCurrentNow(sink);
+        saveRecovery(true, null, sink);
     }
 
     public void gotoIndex(int index, MessageSink sink) {
@@ -204,6 +258,7 @@ public final class SessionController {
         }
         sink.info("Moved to " + describeCurrent());
         switchCurrentNow(sink);
+        saveRecovery(true, null, sink);
     }
 
     public void gotoXY(int x, int y, MessageSink sink) {
@@ -242,6 +297,7 @@ public final class SessionController {
             finish(sink);
             return;
         }
+        saveRecovery(false, null, sink);
         switchDelayTicks = 2;
     }
 
@@ -251,7 +307,9 @@ public final class SessionController {
         }
         if (!session.advance()) {
             finish(sink);
+            return;
         }
+        saveRecovery(false, null, sink);
     }
 
     public void autoAdvanceAfterDrag(int count, MessageSink sink) {
@@ -264,6 +322,7 @@ public final class SessionController {
                 return;
             }
         }
+        saveRecovery(false, null, sink);
     }
 
     public void tick(MessageSink sink) {
@@ -361,6 +420,7 @@ public final class SessionController {
         if (session != null) {
             session.pause();
             session.setWarning(warning);
+            saveRecovery(true, warning, sink);
         }
         sink.error(warning);
     }
@@ -371,6 +431,29 @@ public final class SessionController {
         }
         sink.info("Painting complete.");
         session = null;
+        if (!recoveryBatchSnapshot.active()) {
+            clearRecovery(sink);
+        }
+    }
+
+    public void saveRecovery(boolean immediate, String warning, MessageSink sink) {
+        saveRecovery(immediate, warning, 0, false, sink);
+    }
+
+    public void saveRecovery(boolean immediate, String warning, int smartActionBoundary,
+                             boolean smartBucketInFlight, MessageSink sink) {
+        if (recoveryStore == null || session == null) {
+            return;
+        }
+        recoveryStore.saveForSession(session, configManager.config().paintingMode(), recoveryBatchSnapshot,
+                smartActionBoundary, smartBucketInFlight, warning == null ? session.warning() : warning,
+                immediate, text -> sink.error(text));
+    }
+
+    public void clearRecovery(MessageSink sink) {
+        if (recoveryStore != null) {
+            recoveryStore.clear(text -> sink.error(text));
+        }
     }
 
     public String describeCurrent() {

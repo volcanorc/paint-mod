@@ -15,6 +15,7 @@ public record PreparedSmartPlan(
     }
 
     public boolean available() {
-        return unavailableReason == null && baseCoat != null && bucketAimAnchors.size() == 9;
+        return unavailableReason == null && baseCoat != null
+                && bucketAimAnchors.size() >= SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS;
     }
 }

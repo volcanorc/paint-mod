@@ -227,7 +227,7 @@ Smart mode normally expects:
 - An exact `minecraft:bucket` in the offhand.
 - Smart Basecoat and Painting Bucket enabled.
 
-The initial bucket sequence selects the dominant item, checks both hands, swaps the color and bucket, aims at guarded center anchors, sends one fill click, restores the hands, and verifies the result. Pause/resume protection prevents the same fill click from being sent twice.
+The initial bucket sequence selects the dominant item, checks both hands, swaps the color and bucket, aims only at exact calibrated canvas points, sends one fill click, restores the hands, and verifies the result. Natural bucket movement is enabled by default: Smart builds a shuffled path of up to 30 inner calibrated look/click points, moves the camera through look-only points between equip/swap/click/restore stages, and uses randomized delays. Pause/resume protection prevents the same fill click from being sent twice.
 
 For mostly pure-black artwork, Smart can use a special deep-black basecoat: it bucket-fills with Ink Sac first, then runs one or two guarded Coal bucket passes. Coal is still not used as a normal pixel-matching color; it is only used as a Smart bucket darkening tool after the Ink Sac basecoat.
 
@@ -241,6 +241,7 @@ Useful checks:
 ```
 
 Smart bucket delay commands are advanced controls. Increase delays if the server or connection responds slowly.
+Natural bucket movement keeps all camera movement inside calibrated canvas points. It avoids recently used points and Y rows for a randomized 4-7 movement-stage cooldown when alternatives are available, then relaxes that preference instead of blocking. If fewer than 30 exact points are usable, Smart refuses to start instead of falling back to a smaller center path.
 
 ## Batch and Post-Paint Automation
 
@@ -326,7 +327,9 @@ Selecting a suggestion only fills the chat box. Press Enter separately to run th
 - `#painting status` — Show the current painting, session, calibration, and batch state.
 - `#painting stop` — Stop the batch, painters, and current session.
 - `#painting pause` — Pause the current session and Smart painter safely.
-- `#painting resume` — Resume a paused session/painter when its state can be verified.
+- `#painting resume` — Resume a paused session/painter, or restore the saved local recovery checkpoint after Minecraft restarts.
+- `#painting recovery status` — Show saved interrupted file, batch, pixel/action progress, and PNG check state.
+- `#painting recovery clear` — Discard saved interrupted progress.
 - `#painting back` — Move the session back one pixel for correction.
 - `#painting skip` — Skip the current pixel.
 - `#painting goto <index>` — Jump to a flat pixel index.
@@ -373,8 +376,13 @@ Bucket settings can be changed while Painting Type is Smart.
 - `#painting bucket aimdelay <ticks>` — Set the fill-anchor settling delay.
 - `#painting bucket afterdelay <ticks>` — Set the wait after the fill click.
 - `#painting bucket restoredelay <ticks>` — Set the hand-restoration verification delay.
+- `#painting bucket natural on` — Confirm required shuffled calibrated look points and randomized bucket delays.
+- `#painting bucket natural off` — Rejected: natural bucket movement is required for bucket/Coal safety.
+- `#painting bucket natural status` — Show whether natural movement is enabled and the saved delay range.
+- `#painting bucket natural delay <minTicks> <maxTicks>` — Set the random delay range used between bucket stages. `10 32` is roughly 0.5 to 1.6 seconds.
 
 Default bucket delays are 10, 20, 16, 24, and 10 ticks in that order.
+Default natural bucket delay range is 10-32 ticks. Only the fill-click stage clicks; all other natural bucket points are camera movement only.
 
 ### Coal Black Commands
 
@@ -516,6 +524,14 @@ Inventory and container screens can make automated clicks unsafe. Close the scre
 With post-paint automation disabled, this is expected. Save/store the finished canvas, prepare the next blank canvas, and run `#painting batch continue`.
 
 If post-paint automation failed, read its error, complete or repair the missing step, then continue.
+
+### Resume after lag, crash, or Minecraft restart
+
+Auto/Smart painting saves a lightweight local checkpoint in `.minecraft/artmap_color_assistant/progress.json`. For a batch such as `#painting batch start 5 20 Dragon`, if painting stops at `15.png`, run `#painting resume` after reopening Minecraft. The mod restores the batch/file position and selected item, then waits for you to intentionally start Auto/Smart again.
+
+The checkpoint stores the active PNG filename, file size, and modified time. If the PNG was replaced after the checkpoint, recovery blocks instead of painting stale old image data. Start a new batch or run `#painting recovery clear` if you intentionally changed the files.
+
+Smart bucket and Coal-black darkening are extra guarded. If recovery cannot prove whether a bucket/Coal click already happened, it blocks rather than risking a second bucket fill or extra Coal darkening.
 
 ### Colors look wrong
 

@@ -7,6 +7,8 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class SmartPainter {
     private final MinecraftClient client;
@@ -15,6 +17,7 @@ public final class SmartPainter {
     private final SmartPaintPlanner planner = new SmartPaintPlanner();
     private final ArrayDeque<PaintAction> actions = new ArrayDeque<>();
     private final BucketExecutionState bucketExecution = new BucketExecutionState();
+    private final BucketNaturalTiming bucketTiming = new BucketNaturalTiming();
     private final SmartWaypointClock dragWaypointClock = new SmartWaypointClock();
     private SmartCanvas canvas;
     private PreparedSmartPlan preparedPlan;
@@ -31,6 +34,9 @@ public final class SmartPainter {
     private boolean running;
     private boolean paused;
     private String bucketDisabledReason;
+    private int completedActionBoundary;
+    private int recoveredActionBoundary;
+    private List<Integer> resolvedBucketAnchors = List.of();
 
     public SmartPainter(MinecraftClient client, SessionController controller, CalibrationManager calibrationManager) {
         this.client = client;
@@ -54,8 +60,12 @@ public final class SmartPainter {
                 + " trusted=" + (canvas != null && canvas.trusted())
                 + " wrong=" + (wrong < 0 ? "n/a" : wrong)
                 + " queued=" + actions.size()
+                + " boundary=" + completedActionBoundary
                 + " smartWaypointTicks=" + SmartWaypointClock.WAYPOINT_TICKS
                 + " bucket=single-initial-left-click"
+                + " bucketNatural=required"
+                + " delay=" + config.bucketNaturalDelayMinTicks() + "-" + config.bucketNaturalDelayMaxTicks() + "t"
+                + " path=natural-30"
                 + " coalBlack=" + (preparedPlan != null && preparedPlan.preview().coalBlackPlanned())
                 + " coalPasses=" + (preparedPlan == null ? 0 : preparedPlan.preview().coalBlackPasses())
                 + " hands={" + controller.bucketHandStatus(dominant) + "}"
@@ -99,7 +109,7 @@ public final class SmartPainter {
         }
 
         preparedPlan = plan;
-        bucketExecution.beginImage(plan.bucketAimAnchors());
+        bucketExecution.beginImage(resolvedBucketAnchors, config.canvasWidth());
         canvas = SmartCanvas.fresh(session, config);
         actions.clear();
         actions.add(plan.baseCoat());
@@ -115,10 +125,18 @@ public final class SmartPainter {
         dragEndHoldRemaining = 0;
         bucketHandsSwapped = false;
         bucketDisabledReason = null;
+        resolvedBucketAnchors = List.of();
+        completedActionBoundary = 0;
         running = true;
         paused = false;
+        applyRecoveredBoundary();
+        controller.saveRecovery(true, null, completedActionBoundary, false, sink);
         sink.info("Smart paint started with a prepared linear plan. " + plan.preview().summary());
         return true;
+    }
+
+    public void recoverActionBoundary(int boundary) {
+        recoveredActionBoundary = Math.max(0, boundary);
     }
 
     private String preflight(PreparedSmartPlan plan, ConfigManager.Config config) {
@@ -134,7 +152,12 @@ public final class SmartPainter {
         if (!controller.exactEmptyBucketInOffhand()) {
             return "offhand must contain exact minecraft:bucket";
         }
-        for (int anchor : plan.bucketAimAnchors()) {
+        List<Integer> bucketAnchors = resolveBucketAnchors(plan, config);
+        if (bucketAnchors.isEmpty()) {
+            return "Smart bucket needs 30 exact natural bucket anchors; exact calibration is incomplete";
+        }
+        resolvedBucketAnchors = bucketAnchors;
+        for (int anchor : bucketAnchors) {
             PaintStep step = controller.session().steps().get(anchor);
             if (!calibrationManager.hasExactFor(step, config)) {
                 return "missing exact calibration at bucket anchor " + anchor;
@@ -172,6 +195,7 @@ public final class SmartPainter {
         restoreBucketHandsIfVerified();
         paused = true;
         invalidateTrust("manual pause");
+        controller.saveRecovery(true, "smart paused", completedActionBoundary, action != null && action.bucket(), sink);
         sink.info("Smart paint paused safely.");
     }
 
@@ -203,6 +227,7 @@ public final class SmartPainter {
             }
         }
         paused = false;
+        controller.saveRecovery(true, null, completedActionBoundary, false, sink);
         sink.info("Smart paint resumed.");
     }
 
@@ -236,7 +261,7 @@ public final class SmartPainter {
         switch (phase) {
             case PLAN -> plan(sink);
             case SELECT_ITEM -> selectItem(sink);
-            case WAIT_FOR_ITEM -> waitForItem(config);
+            case WAIT_FOR_ITEM -> waitForItem(config, sink);
             case AIM -> aim(config, sink);
             case WAIT_FOR_AIM -> waitForAim(config, sink);
             case CLICK -> click(config);
@@ -248,7 +273,7 @@ public final class SmartPainter {
             case DRAG_HOLD -> dragHold(config, sink);
             case DRAG_AIM -> dragAim(config, sink);
             case DRAG_RELEASE -> dragRelease(config);
-            case APPLY -> applyAction();
+            case APPLY -> applyAction(config, sink);
             case IDLE -> { }
         }
     }
@@ -273,13 +298,15 @@ public final class SmartPainter {
         phase = Phase.WAIT_FOR_ITEM;
     }
 
-    private void waitForItem(ConfigManager.Config config) {
+    private void waitForItem(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (controller.hasPendingInventorySwap()) {
             return;
         }
         if (action.bucket()) {
             bucketExecution.beginBucketAction();
-            bucketPhaseTicks = config.bucketColorSelectDelayTicks();
+            controller.saveRecovery(true, "smart bucket action in progress", completedActionBoundary, true,
+                    sink);
+            bucketPhaseTicks = bucketDelay(config, config.bucketColorSelectDelayTicks());
             phase = Phase.BUCKET_STAGE_AIM;
         } else {
             phase = Phase.AIM;
@@ -319,7 +346,7 @@ public final class SmartPainter {
     }
 
     private void bucketStageAim(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!aimAtBucketAnchor(0, config)) {
+        if (!aimAtBucketAnchor(BucketExecutionState.STAGE_AFTER_SELECT_LOOK, config)) {
             pauseWithError(sink, "Smart bucket could not aim at its staging anchor.");
             return;
         }
@@ -330,22 +357,26 @@ public final class SmartPainter {
             pauseWithError(sink, "Smart bucket hand preflight changed: " + controller.bucketHandStatus(action.color()) + ".");
             return;
         }
+        if (!aimAtBucketAnchor(BucketExecutionState.STAGE_BEFORE_SWAP_LOOK, config)) {
+            pauseWithError(sink, "Smart bucket could not aim at its pre-swap anchor.");
+            return;
+        }
         if (!controller.requestSwapHands()) {
             pauseWithError(sink, "Smart bucket could not request the vanilla hand swap.");
             return;
         }
-        bucketPhaseTicks = config.bucketHandSwapDelayTicks();
+        bucketPhaseTicks = bucketDelay(config, config.bucketHandSwapDelayTicks());
         phase = Phase.BUCKET_VERIFY_SWAPPED;
     }
 
     private void bucketVerifySwapped(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!aimAtBucketAnchor(1, config)) {
+        if (!aimAtBucketAnchor(BucketExecutionState.STAGE_AFTER_SWAP_LOOK, config)) {
             pauseWithError(sink, "Smart bucket lost its swap-verification aim anchor.");
             return;
         }
         if (controller.bucketPairSwapped(action.color())) {
             bucketHandsSwapped = true;
-            bucketPhaseTicks = config.bucketFillAimSettleTicks();
+            bucketPhaseTicks = bucketDelay(config, config.bucketFillAimSettleTicks());
             phase = Phase.BUCKET_FILL_AIM;
             return;
         }
@@ -355,7 +386,7 @@ public final class SmartPainter {
     }
 
     private void bucketFillAim(ConfigManager.Config config, SessionController.MessageSink sink) {
-        PaintStep anchor = bucketAnchor(1);
+        PaintStep anchor = bucketAnchor(BucketExecutionState.STAGE_FILL_CLICK);
         if (anchor == null || !calibrationManager.aimAt(anchor, config)) {
             pauseWithError(sink, "Smart bucket could not aim at its fill anchor.");
             return;
@@ -365,7 +396,7 @@ public final class SmartPainter {
             return;
         }
         if (!calibrationManager.withinTolerance(anchor, config)) {
-            bucketPhaseTicks = config.bucketFillAimSettleTicks();
+            bucketPhaseTicks = bucketDelay(config, config.bucketFillAimSettleTicks());
             return;
         }
         if (bucketPhaseTicks-- > 0) {
@@ -374,12 +405,12 @@ public final class SmartPainter {
         if (bucketExecution.markFillClickIfFirst()) {
             performClick(AutoClickButton.LEFT);
         }
-        bucketPhaseTicks = config.bucketPostFillDelayTicks();
+        bucketPhaseTicks = bucketDelay(config, config.bucketPostFillDelayTicks());
         phase = Phase.BUCKET_POST_FILL;
     }
 
     private void bucketPostFill(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!aimAtBucketAnchor(2, config)) {
+        if (!aimAtBucketAnchor(BucketExecutionState.STAGE_AFTER_CLICK_LOOK, config)) {
             pauseWithError(sink, "Smart bucket lost its post-fill aim anchor.");
             return;
         }
@@ -390,16 +421,20 @@ public final class SmartPainter {
             pauseWithError(sink, "Smart bucket cannot safely restore changed hands: " + controller.bucketHandStatus(action.color()) + ".");
             return;
         }
+        if (!aimAtBucketAnchor(BucketExecutionState.STAGE_BEFORE_RESTORE_LOOK, config)) {
+            pauseWithError(sink, "Smart bucket could not aim at its pre-restore anchor.");
+            return;
+        }
         if (!controller.requestSwapHands()) {
             pauseWithError(sink, "Smart bucket could not request the restoring hand swap.");
             return;
         }
-        bucketPhaseTicks = config.bucketHandRestoreDelayTicks();
+        bucketPhaseTicks = bucketDelay(config, config.bucketHandRestoreDelayTicks());
         phase = Phase.BUCKET_VERIFY_RESTORED;
     }
 
     private void bucketVerifyRestored(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!aimAtBucketAnchor(2, config)) {
+        if (!aimAtBucketAnchor(BucketExecutionState.STAGE_AFTER_RESTORE_LOOK, config)) {
             pauseWithError(sink, "Smart bucket lost its restoration aim anchor.");
             return;
         }
@@ -424,6 +459,10 @@ public final class SmartPainter {
         }
         int anchor = bucketExecution.activeAnchor(offset);
         return anchor < 0 ? null : canvas.targetStep(anchor);
+    }
+
+    private int bucketDelay(ConfigManager.Config config, int fixedDelayTicks) {
+        return bucketTiming.delay(config, fixedDelayTicks);
     }
 
     private void dragHold(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -480,12 +519,64 @@ public final class SmartPainter {
         phase = Phase.APPLY;
     }
 
-    private void applyAction() {
+    private void applyAction(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (action != null) {
+            boolean bucket = action.bucket();
             canvas.apply(action);
+            completedActionBoundary++;
+            controller.saveRecovery(bucket, null, completedActionBoundary, false,
+                    sink);
+            if (bucket && config.bucketNaturalMovementEnabled()) {
+                waitTicks = bucketDelay(config, 0);
+            }
         }
         action = null;
         phase = Phase.PLAN;
+    }
+
+    private List<Integer> resolveBucketAnchors(PreparedSmartPlan plan, ConfigManager.Config config) {
+        PaintSession session = controller.session();
+        if (session == null) {
+            return List.of();
+        }
+        List<Integer> exactNatural = exactAnchors(plan.bucketAimAnchors(), config, SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS);
+        if (exactNatural.size() >= SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS) {
+            return exactNatural.subList(0, SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS);
+        }
+        return List.of();
+    }
+
+    private List<Integer> exactAnchors(List<Integer> candidates, ConfigManager.Config config, int limit) {
+        PaintSession session = controller.session();
+        if (session == null) {
+            return List.of();
+        }
+        ArrayList<Integer> exact = new ArrayList<>(Math.min(limit, candidates.size()));
+        for (int index : candidates) {
+            if (index < 0 || index >= session.steps().size()) {
+                continue;
+            }
+            if (calibrationManager.hasExactFor(session.steps().get(index), config)) {
+                exact.add(index);
+                if (exact.size() >= limit) {
+                    break;
+                }
+            }
+        }
+        return List.copyOf(exact);
+    }
+
+    private void applyRecoveredBoundary() {
+        if (recoveredActionBoundary <= 0 || canvas == null) {
+            recoveredActionBoundary = 0;
+            return;
+        }
+        while (completedActionBoundary < recoveredActionBoundary && !actions.isEmpty()) {
+            PaintAction completed = actions.pollFirst();
+            canvas.apply(completed);
+            completedActionBoundary++;
+        }
+        recoveredActionBoundary = 0;
     }
 
     private Phase nextPaintPhase() {
@@ -522,6 +613,7 @@ public final class SmartPainter {
         restoreBucketHandsIfVerified();
         paused = true;
         invalidateTrust(message);
+        controller.saveRecovery(true, message, completedActionBoundary, action != null && action.bucket(), sink);
         sink.error(message);
     }
 
