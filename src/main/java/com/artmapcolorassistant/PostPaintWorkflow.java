@@ -37,6 +37,7 @@ public final class PostPaintWorkflow {
     private int funJumpsRemaining;
     private int funJumpPressTicksRemaining;
     private int funJumpGapTicksRemaining;
+    private int overflowClearAttempts;
     private boolean funJumpKeyHeld;
     private ItemStack pendingVaultTransferStack = ItemStack.EMPTY;
     private Phase phase = Phase.IDLE;
@@ -68,6 +69,7 @@ public final class PostPaintWorkflow {
         this.funJumpsRemaining = 0;
         this.funJumpPressTicksRemaining = 0;
         this.funJumpGapTicksRemaining = 0;
+        this.overflowClearAttempts = 0;
         this.funJumpKeyHeld = false;
         this.pendingVaultTransferStack = ItemStack.EMPTY;
         this.phase = Phase.SELECT_SAVE_ITEM;
@@ -84,6 +86,7 @@ public final class PostPaintWorkflow {
         funJumpsRemaining = 0;
         funJumpPressTicksRemaining = 0;
         funJumpGapTicksRemaining = 0;
+        overflowClearAttempts = 0;
         pendingVaultTransferStack = ItemStack.EMPTY;
         phase = Phase.IDLE;
     }
@@ -98,6 +101,11 @@ public final class PostPaintWorkflow {
         }
         switch (phase) {
             case SELECT_SAVE_ITEM -> selectSaveItem(config, sink);
+            case OPEN_OVERFLOW_PLAYER_VAULT -> openOverflowPlayerVault(sink);
+            case WAIT_OVERFLOW_PLAYER_VAULT_SCREEN -> waitOverflowPlayerVaultScreen(config, sink);
+            case QUICK_MOVE_BLOCKER_ITEM -> quickMoveBlockerItem(config, sink);
+            case WAIT_BLOCKER_ITEM_REMOVED -> waitBlockerItemRemoved(config, sink);
+            case CLOSE_OVERFLOW_PLAYER_VAULT -> closeOverflowPlayerVault();
             case WAIT_SAVE_SELECT -> waitSaveSelect(config, sink);
             case AIM_SAVE_TARGET -> aimSaveTarget(config, sink);
             case RIGHT_CLICK_SAVE -> rightClickSave(config, sink);
@@ -140,12 +148,30 @@ public final class PostPaintWorkflow {
             return;
         }
         if (hotbarNonEmpty(config.postPaintFinishedHotbarSlot())) {
-            fail(sink, "Post-paint finished-item slot " + (config.postPaintFinishedHotbarSlot() + 1) + " is not empty.");
+            startOverflowBlockerClear(config, sink);
             return;
         }
+        overflowClearAttempts = 0;
         client.player.getInventory().selectedSlot = config.postPaintSaveHotbarSlot();
         waitTicks = config.postPaintSaveSelectDelayTicks();
         phase = Phase.WAIT_SAVE_SELECT;
+    }
+
+    private void startOverflowBlockerClear(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (!PostPaintOverflowPolicy.canTryClear(overflowClearAttempts)) {
+            fail(sink, "Post-paint finished-item slot " + (config.postPaintFinishedHotbarSlot() + 1)
+                    + " kept refilling after " + PostPaintOverflowPolicy.MAX_CLEAR_ATTEMPTS
+                    + " blocker clear attempt(s). Move nearby dropped items or clear the slot manually.");
+            return;
+        }
+        pendingVaultTransferStack = hotbarStack(config.postPaintFinishedHotbarSlot()).copy();
+        overflowClearAttempts++;
+        sink.info("Post-paint finished-item slot " + (config.postPaintFinishedHotbarSlot() + 1)
+                + " is blocked by \"" + pendingVaultTransferStack.getName().getString()
+                + "\". Storing blocker in /pv 1 before retrying rename/save (attempt "
+                + overflowClearAttempts + "/" + PostPaintOverflowPolicy.MAX_CLEAR_ATTEMPTS + ").");
+        waitTicks = overflowDelayTicks();
+        phase = Phase.OPEN_OVERFLOW_PLAYER_VAULT;
     }
 
     private void waitSaveSelect(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -300,6 +326,82 @@ public final class PostPaintWorkflow {
         if (--timeoutTicks <= 0) {
             fail(sink, "Saved canvas did not appear in hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1) + ".");
         }
+    }
+
+    private void openOverflowPlayerVault(SessionController.MessageSink sink) {
+        if (!hasPlayer(sink)) {
+            fail();
+            return;
+        }
+        if (client.currentScreen != null) {
+            client.setScreen(null);
+        }
+        String command = PostPaintOverflowPolicy.VAULT_COMMAND.startsWith("/")
+                ? PostPaintOverflowPolicy.VAULT_COMMAND.substring(1)
+                : PostPaintOverflowPolicy.VAULT_COMMAND;
+        client.player.networkHandler.sendChatCommand(command);
+        timeoutTicks = SCREEN_TIMEOUT_TICKS;
+        phase = Phase.WAIT_OVERFLOW_PLAYER_VAULT_SCREEN;
+    }
+
+    private void waitOverflowPlayerVaultScreen(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (client.currentScreen instanceof HandledScreen<?>) {
+            phase = Phase.QUICK_MOVE_BLOCKER_ITEM;
+            waitTicks = overflowDelayTicks();
+            return;
+        }
+        if (--timeoutTicks <= 0) {
+            fail(sink, PostPaintOverflowPolicy.VAULT_COMMAND + " did not open for temporary blocker storage. Clear hotbar slot "
+                    + (config.postPaintFinishedHotbarSlot() + 1) + " manually.");
+        }
+    }
+
+    private void quickMoveBlockerItem(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (!(client.currentScreen instanceof HandledScreen<?>) || client.interactionManager == null || client.player == null) {
+            fail(sink, PostPaintOverflowPolicy.VAULT_COMMAND + " is not open for temporary blocker transfer.");
+            return;
+        }
+        ItemStack sourceStack = hotbarStack(config.postPaintFinishedHotbarSlot());
+        if (sourceStack.isEmpty()) {
+            phase = Phase.CLOSE_OVERFLOW_PLAYER_VAULT;
+            waitTicks = overflowDelayTicks();
+            return;
+        }
+        Slot slot = playerHotbarScreenSlot(config.postPaintFinishedHotbarSlot());
+        if (slot == null) {
+            fail(sink, "Could not find hotbar slot " + (config.postPaintFinishedHotbarSlot() + 1)
+                    + " in the open /pv 1 screen handler.");
+            return;
+        }
+        pendingVaultTransferStack = sourceStack.copy();
+        client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, slot.id, 0, SlotActionType.QUICK_MOVE, client.player);
+        waitTicks = overflowDelayTicks();
+        timeoutTicks = 1;
+        phase = Phase.WAIT_BLOCKER_ITEM_REMOVED;
+    }
+
+    private void waitBlockerItemRemoved(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (!hotbarNonEmpty(config.postPaintFinishedHotbarSlot())) {
+            phase = Phase.CLOSE_OVERFLOW_PLAYER_VAULT;
+            waitTicks = overflowDelayTicks();
+            return;
+        }
+        if (--timeoutTicks <= 0) {
+            String itemName = pendingVaultTransferStack.isEmpty() ? "item" : pendingVaultTransferStack.getName().getString();
+            fail(sink, "Temporary blocker \"" + itemName + "\" stayed in hotbar slot "
+                    + (config.postPaintFinishedHotbarSlot() + 1)
+                    + " after /pv 1 transfer. /pv 1 may be full; clear the slot manually.");
+        }
+    }
+
+    private void closeOverflowPlayerVault() {
+        if (client.player != null) {
+            client.player.closeHandledScreen();
+        }
+        client.setScreen(null);
+        pendingVaultTransferStack = ItemStack.EMPTY;
+        phase = Phase.SELECT_SAVE_ITEM;
+        waitTicks = overflowDelayTicks();
     }
 
     private void openPlayerVault(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -525,6 +627,10 @@ public final class PostPaintWorkflow {
         return null;
     }
 
+    private int overflowDelayTicks() {
+        return PostPaintOverflowPolicy.randomDelayTicks();
+    }
+
     private String saveName() {
         return suffix.isBlank() ? Integer.toString(imageNumber) : imageNumber + " " + suffix;
     }
@@ -557,6 +663,11 @@ public final class PostPaintWorkflow {
     private enum Phase {
         IDLE,
         SELECT_SAVE_ITEM,
+        OPEN_OVERFLOW_PLAYER_VAULT,
+        WAIT_OVERFLOW_PLAYER_VAULT_SCREEN,
+        QUICK_MOVE_BLOCKER_ITEM,
+        WAIT_BLOCKER_ITEM_REMOVED,
+        CLOSE_OVERFLOW_PLAYER_VAULT,
         WAIT_SAVE_SELECT,
         AIM_SAVE_TARGET,
         RIGHT_CLICK_SAVE,

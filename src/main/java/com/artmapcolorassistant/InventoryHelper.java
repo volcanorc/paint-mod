@@ -14,14 +14,18 @@ import net.minecraft.util.Identifier;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Consumer;
 
 public final class InventoryHelper {
+    private static final int OFFHAND_INVENTORY_INDEX = 40;
+
     private final MinecraftClient client;
     private PendingSwap pendingSwap;
+    private PendingBucketSetup pendingBucketSetup;
 
     public InventoryHelper(MinecraftClient client) {
         this.client = client;
@@ -108,6 +112,9 @@ public final class InventoryHelper {
     }
 
     public SwitchResult tickPendingSwap() {
+        if (pendingBucketSetup != null) {
+            return tickPendingBucketSetup();
+        }
         if (pendingSwap == null) {
             return SwitchResult.ok("No pending swap.");
         }
@@ -131,7 +138,7 @@ public final class InventoryHelper {
     }
 
     public boolean hasPendingSwap() {
-        return pendingSwap != null;
+        return pendingSwap != null || pendingBucketSetup != null;
     }
 
     public boolean itemExists(ArtMapColor color) {
@@ -152,9 +159,60 @@ public final class InventoryHelper {
         return Identifier.of("minecraft", "bucket").equals(Registries.ITEM.getId(stack.getItem()));
     }
 
+    public boolean exactEmptyBucketAvailableForOffhand() {
+        return exactEmptyBucketInOffhand() || findExactBucketSlot() != null;
+    }
+
     public boolean exactEmptyBucketInMainHand() {
         ClientPlayerEntity player = client.player;
         return player != null && exactBucket(player.getMainHandStack());
+    }
+
+    public SwitchResult prepareExactEmptyBucketInOffhand(Consumer<Text> messageSink) {
+        if (exactEmptyBucketInOffhand()) {
+            return SwitchResult.ok("Exact empty bucket already in offhand.");
+        }
+        if (pendingBucketSetup != null) {
+            return SwitchResult.pending("Waiting for bucket/offhand inventory sync.");
+        }
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return SwitchResult.failed("No client player is available for bucket setup.");
+        }
+        if (!canSwapNow()) {
+            return SwitchResult.failed("Cannot move bucket to offhand while a GUI/container is open.");
+        }
+        if (client.interactionManager == null) {
+            return SwitchResult.failed("Cannot move bucket to offhand: no interaction manager.");
+        }
+        if (!cursorEmpty()) {
+            return SwitchResult.failed("Cannot move bucket to offhand while the cursor is holding an item.");
+        }
+        SlotRef offhand = findPlayerInventorySlot(OFFHAND_INVENTORY_INDEX);
+        if (offhand == null) {
+            return SwitchResult.failed("Could not find the player offhand slot for bucket setup.");
+        }
+        SlotRef bucket = findExactBucketSlot();
+        if (bucket == null) {
+            return SwitchResult.failed("Exact minecraft:bucket is missing. Put an empty bucket in inventory or offhand.");
+        }
+        boolean offhandOccupied = !player.getOffHandStack().isEmpty();
+        SlotRef parking = null;
+        if (!player.getOffHandStack().isEmpty()) {
+            parking = findEmptyParkingSlot();
+            if (parking == null) {
+                return SwitchResult.failed("Offhand is occupied and no empty inventory slot is available to park it.");
+            }
+            if (messageSink != null) {
+                messageSink.accept(Text.literal("[ArtMap] Will park occupied offhand item before delayed bucket setup."));
+            }
+        }
+        pendingBucketSetup = new PendingBucketSetup(BucketOffhandSetupPlan.steps(offhandOccupied),
+                offhand, parking, bucket, BucketOffhandSetupPlan.randomDelayTicks());
+        if (messageSink != null) {
+            messageSink.accept(Text.literal("[ArtMap] Starting delayed minecraft:bucket offhand setup for Smart bucket painting."));
+        }
+        return SwitchResult.pending("Delayed bucket/offhand setup started.");
     }
 
     public boolean mainHandMatches(ArtMapColor color) {
@@ -203,6 +261,182 @@ public final class InventoryHelper {
 
     private boolean canSwapNow() {
         return client.currentScreen == null || client.currentScreen instanceof ChatScreen;
+    }
+
+    private boolean cursorEmpty() {
+        ClientPlayerEntity player = client.player;
+        return player != null && player.currentScreenHandler.getCursorStack().isEmpty();
+    }
+
+    private SwitchResult tickPendingBucketSetup() {
+        PendingBucketSetup setup = pendingBucketSetup;
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            pendingBucketSetup = null;
+            return SwitchResult.failed("Bucket setup failed: no client player.");
+        }
+        if (!canSwapNow()) {
+            pendingBucketSetup = null;
+            return SwitchResult.failed("Bucket setup stopped because a GUI/container opened.");
+        }
+        if (client.interactionManager == null) {
+            pendingBucketSetup = null;
+            return SwitchResult.failed("Bucket setup failed: no interaction manager.");
+        }
+        if (setup.delayTicks-- > 0) {
+            return SwitchResult.pending("Waiting before next bucket/offhand setup action.");
+        }
+        if (setup.stepCursor >= setup.steps.size()) {
+            pendingBucketSetup = null;
+            if (exactEmptyBucketInOffhand() && cursorEmpty()) {
+                return SwitchResult.ok("Empty bucket moved to offhand.");
+            }
+            return SwitchResult.failed("Could not verify an exact empty bucket in offhand. Put minecraft:bucket in offhand manually.");
+        }
+
+        BucketOffhandSetupPlan.Step step = setup.steps.get(setup.stepCursor);
+        String validation = validateBucketSetupStep(setup, step);
+        if (validation != null) {
+            pendingBucketSetup = null;
+            return SwitchResult.failed(validation);
+        }
+        clickPickup(slotForBucketSetupStep(setup, step).screenSlotId);
+        setup.stepCursor++;
+        setup.delayTicks = BucketOffhandSetupPlan.randomDelayTicks();
+        return SwitchResult.pending("Performed delayed bucket/offhand setup action " + setup.stepCursor
+                + "/" + setup.steps.size() + ".");
+    }
+
+    private String validateBucketSetupStep(PendingBucketSetup setup, BucketOffhandSetupPlan.Step step) {
+        return switch (step) {
+            case PICK_OFFHAND -> {
+                if (!cursorEmpty()) {
+                    yield "Bucket setup stopped because the cursor is no longer empty before parking offhand.";
+                }
+                if (slotStack(setup.offhandSlot).isEmpty()) {
+                    yield "Bucket setup stopped because offhand became empty before parking.";
+                }
+                yield null;
+            }
+            case PLACE_PARKED_OFFHAND -> {
+                if (setup.parkingSlot == null) {
+                    yield "Bucket setup stopped because no parking slot is available.";
+                }
+                if (cursorEmpty()) {
+                    yield "Bucket setup stopped because the cursor is empty before placing the parked offhand item.";
+                }
+                if (!slotStack(setup.parkingSlot).isEmpty()) {
+                    yield "Bucket setup stopped because the parking slot is no longer empty.";
+                }
+                yield null;
+            }
+            case PICK_BUCKET -> {
+                if (!cursorEmpty()) {
+                    yield "Bucket setup stopped because the cursor is not empty before picking up the bucket.";
+                }
+                if (!exactBucket(slotStack(setup.bucketSlot))) {
+                    yield "Bucket setup stopped because the exact minecraft:bucket moved before pickup.";
+                }
+                yield null;
+            }
+            case PLACE_BUCKET_OFFHAND -> {
+                if (!exactBucket(cursorStack())) {
+                    yield "Bucket setup stopped because the cursor is not holding exact minecraft:bucket.";
+                }
+                if (!slotStack(setup.offhandSlot).isEmpty()) {
+                    yield "Bucket setup stopped because offhand is no longer empty before placing bucket.";
+                }
+                yield null;
+            }
+        };
+    }
+
+    private SlotRef slotForBucketSetupStep(PendingBucketSetup setup, BucketOffhandSetupPlan.Step step) {
+        return switch (step) {
+            case PICK_OFFHAND, PLACE_BUCKET_OFFHAND -> setup.offhandSlot;
+            case PLACE_PARKED_OFFHAND -> setup.parkingSlot;
+            case PICK_BUCKET -> setup.bucketSlot;
+        };
+    }
+
+    private ItemStack cursorStack() {
+        ClientPlayerEntity player = client.player;
+        return player == null ? ItemStack.EMPTY : player.currentScreenHandler.getCursorStack();
+    }
+
+    private ItemStack slotStack(SlotRef ref) {
+        ClientPlayerEntity player = client.player;
+        if (player == null || ref == null || ref.inventoryIndex < 0) {
+            return ItemStack.EMPTY;
+        }
+        if (ref.inventoryIndex == OFFHAND_INVENTORY_INDEX) {
+            return player.getOffHandStack();
+        }
+        if (ref.inventoryIndex >= player.getInventory().main.size()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack stack = player.getInventory().main.get(ref.inventoryIndex);
+        return stack == null ? ItemStack.EMPTY : stack;
+    }
+
+    private void clickPickup(int screenSlotId) {
+        client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, screenSlotId, 0,
+                SlotActionType.PICKUP, client.player);
+    }
+
+    private SlotRef findExactBucketSlot() {
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return null;
+        }
+        for (int i = 0; i <= 35 && i < player.getInventory().main.size(); i++) {
+            if (exactBucket(player.getInventory().main.get(i))) {
+                SlotRef ref = findPlayerInventorySlot(i);
+                if (ref != null) {
+                    return ref;
+                }
+            }
+        }
+        return null;
+    }
+
+    private SlotRef findEmptyParkingSlot() {
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return null;
+        }
+        for (int i = 9; i <= 35 && i < player.getInventory().main.size(); i++) {
+            if (player.getInventory().main.get(i).isEmpty()) {
+                SlotRef ref = findPlayerInventorySlot(i);
+                if (ref != null) {
+                    return ref;
+                }
+            }
+        }
+        int selected = player.getInventory().selectedSlot;
+        for (int i = 0; i <= 8 && i < player.getInventory().main.size(); i++) {
+            if (i != selected && player.getInventory().main.get(i).isEmpty()) {
+                SlotRef ref = findPlayerInventorySlot(i);
+                if (ref != null) {
+                    return ref;
+                }
+            }
+        }
+        return null;
+    }
+
+    private SlotRef findPlayerInventorySlot(int inventoryIndex) {
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return null;
+        }
+        for (int i = 0; i < player.currentScreenHandler.slots.size(); i++) {
+            var slot = player.currentScreenHandler.slots.get(i);
+            if (slot.inventory == player.getInventory() && slot.getIndex() == inventoryIndex) {
+                return new SlotRef(slot.id, inventoryIndex);
+            }
+        }
+        return null;
     }
 
     private int safeReservedHotbarSlot(int configured) {
@@ -269,5 +503,26 @@ public final class InventoryHelper {
             this.step = step;
             this.ticksRemaining = ticksRemaining;
         }
+    }
+
+    private static final class PendingBucketSetup {
+        private final List<BucketOffhandSetupPlan.Step> steps;
+        private final SlotRef offhandSlot;
+        private final SlotRef parkingSlot;
+        private final SlotRef bucketSlot;
+        private int stepCursor;
+        private int delayTicks;
+
+        private PendingBucketSetup(List<BucketOffhandSetupPlan.Step> steps, SlotRef offhandSlot,
+                                   SlotRef parkingSlot, SlotRef bucketSlot, int delayTicks) {
+            this.steps = steps;
+            this.offhandSlot = offhandSlot;
+            this.parkingSlot = parkingSlot;
+            this.bucketSlot = bucketSlot;
+            this.delayTicks = delayTicks;
+        }
+    }
+
+    private record SlotRef(int screenSlotId, int inventoryIndex) {
     }
 }

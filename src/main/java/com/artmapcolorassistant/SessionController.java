@@ -385,6 +385,14 @@ public final class SessionController {
         return inventoryHelper.exactEmptyBucketInOffhand();
     }
 
+    public boolean exactEmptyBucketAvailableForOffhand() {
+        return inventoryHelper.exactEmptyBucketAvailableForOffhand();
+    }
+
+    public InventoryHelper.SwitchResult prepareExactEmptyBucketInOffhand(MessageSink sink) {
+        return inventoryHelper.prepareExactEmptyBucketInOffhand(text -> sink.info(text.getString()));
+    }
+
     public boolean itemExists(ArtMapColor color) {
         return inventoryHelper.itemExists(color);
     }

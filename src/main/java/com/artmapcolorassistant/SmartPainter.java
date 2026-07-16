@@ -11,6 +11,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class SmartPainter {
+    private static final int MAX_BUCKET_HAND_SWAP_RETRIES = 2;
+
     private final MinecraftClient client;
     private final SessionController controller;
     private final CalibrationManager calibrationManager;
@@ -18,6 +20,8 @@ public final class SmartPainter {
     private final ArrayDeque<PaintAction> actions = new ArrayDeque<>();
     private final BucketExecutionState bucketExecution = new BucketExecutionState();
     private final BucketNaturalTiming bucketTiming = new BucketNaturalTiming();
+    private final SmartBucketSwapRetryPolicy bucketRetryPolicy =
+            new SmartBucketSwapRetryPolicy(MAX_BUCKET_HAND_SWAP_RETRIES);
     private final SmartWaypointClock dragWaypointClock = new SmartWaypointClock();
     private SmartCanvas canvas;
     private PreparedSmartPlan preparedPlan;
@@ -123,6 +127,7 @@ public final class SmartPainter {
         dragWaypointClock.reset();
         dragStartHoldRemaining = 0;
         dragEndHoldRemaining = 0;
+        bucketRetryPolicy.resetBucketAction();
         bucketHandsSwapped = false;
         bucketDisabledReason = null;
         resolvedBucketAnchors = List.of();
@@ -149,8 +154,8 @@ public final class SmartPainter {
                 return "bucket item " + planned.item() + " is missing";
             }
         }
-        if (!controller.exactEmptyBucketInOffhand()) {
-            return "offhand must contain exact minecraft:bucket";
+        if (!controller.exactEmptyBucketAvailableForOffhand()) {
+            return "exact minecraft:bucket is missing from inventory/offhand";
         }
         List<Integer> bucketAnchors = resolveBucketAnchors(plan, config);
         if (bucketAnchors.isEmpty()) {
@@ -303,7 +308,16 @@ public final class SmartPainter {
             return;
         }
         if (action.bucket()) {
+            InventoryHelper.SwitchResult bucketSetup = controller.prepareExactEmptyBucketInOffhand(sink);
+            if (bucketSetup.pending()) {
+                return;
+            }
+            if (!bucketSetup.success()) {
+                pauseWithError(sink, bucketSetup.message());
+                return;
+            }
             bucketExecution.beginBucketAction();
+            bucketRetryPolicy.resetBucketAction();
             controller.saveRecovery(true, "smart bucket action in progress", completedActionBoundary, true,
                     sink);
             bucketPhaseTicks = bucketDelay(config, config.bucketColorSelectDelayTicks());
@@ -365,6 +379,7 @@ public final class SmartPainter {
             pauseWithError(sink, "Smart bucket could not request the vanilla hand swap.");
             return;
         }
+        bucketRetryPolicy.resetSwap();
         bucketPhaseTicks = bucketDelay(config, config.bucketHandSwapDelayTicks());
         phase = Phase.BUCKET_VERIFY_SWAPPED;
     }
@@ -381,7 +396,11 @@ public final class SmartPainter {
             return;
         }
         if (bucketPhaseTicks-- <= 0) {
-            pauseWithError(sink, "Smart bucket hand swap was not verified: " + controller.bucketHandStatus(action.color()) + ".");
+            if (retryBucketSwapIfStillSafe(config, sink)) {
+                return;
+            }
+            pauseWithError(sink, "Smart bucket hand swap was not verified after "
+                    + bucketRetryPolicy.swapRetries() + " retry attempt(s): " + controller.bucketHandStatus(action.color()) + ".");
         }
     }
 
@@ -429,6 +448,7 @@ public final class SmartPainter {
             pauseWithError(sink, "Smart bucket could not request the restoring hand swap.");
             return;
         }
+        bucketRetryPolicy.resetRestore();
         bucketPhaseTicks = bucketDelay(config, config.bucketHandRestoreDelayTicks());
         phase = Phase.BUCKET_VERIFY_RESTORED;
     }
@@ -444,8 +464,38 @@ public final class SmartPainter {
             return;
         }
         if (bucketPhaseTicks-- <= 0) {
-            pauseWithError(sink, "Smart bucket hand restoration was not verified: " + controller.bucketHandStatus(action.color()) + ".");
+            if (retryBucketRestoreIfStillSafe(config, sink)) {
+                return;
+            }
+            pauseWithError(sink, "Smart bucket hand restoration was not verified after "
+                    + bucketRetryPolicy.restoreRetries() + " retry attempt(s): " + controller.bucketHandStatus(action.color()) + ".");
         }
+    }
+
+    private boolean retryBucketSwapIfStillSafe(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (!bucketRetryPolicy.retrySwapIfReady(controller.bucketPairReady(action.color()))) {
+            return false;
+        }
+        if (!controller.requestSwapHands()) {
+            return false;
+        }
+        bucketPhaseTicks = bucketDelay(config, config.bucketHandSwapDelayTicks());
+        sink.info("Smart bucket hand swap did not verify yet; retrying safe swap "
+                + bucketRetryPolicy.swapRetries() + "/" + bucketRetryPolicy.maxRetries() + ".");
+        return true;
+    }
+
+    private boolean retryBucketRestoreIfStillSafe(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (!bucketRetryPolicy.retryRestoreIfSwapped(controller.bucketPairSwapped(action.color()))) {
+            return false;
+        }
+        if (!controller.requestSwapHands()) {
+            return false;
+        }
+        bucketPhaseTicks = bucketDelay(config, config.bucketHandRestoreDelayTicks());
+        sink.info("Smart bucket hand restoration did not verify yet; retrying safe restore "
+                + bucketRetryPolicy.restoreRetries() + "/" + bucketRetryPolicy.maxRetries() + ".");
+        return true;
     }
 
     private boolean aimAtBucketAnchor(int offset, ConfigManager.Config config) {
