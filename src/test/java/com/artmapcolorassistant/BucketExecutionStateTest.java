@@ -16,6 +16,7 @@ class BucketExecutionStateTest {
     private static final int WIDTH = 32;
     private static final List<Integer> TOO_FEW_ANCHORS = List.of(10, 11, 12, 13, 14, 15, 16, 17, 18);
     private static final List<Integer> NATURAL_ANCHORS = SmartBucketAnchorPlanner.naturalCandidates(WIDTH, 32);
+    private static final List<Integer> FILL_ANCHORS = SmartBucketAnchorPlanner.fillClickCandidates(WIDTH, 32);
 
     @Test
     void fillClickCanOnlyBeMarkedOncePerImage() {
@@ -34,12 +35,31 @@ class BucketExecutionStateTest {
         state.beginImage(NATURAL_ANCHORS, WIDTH);
         state.beginBucketAction();
         state.markFillClickIfFirst();
+        int lastAnchor = state.activeAnchors().getLast();
+        int lastRow = CanvasMath.toY(lastAnchor, WIDTH);
 
         state.beginImage(NATURAL_ANCHORS, WIDTH);
+        assertFalse(state.fillClickOccurred());
+        assertEquals(BucketExecutionState.PATH_POINTS_PER_BUCKET_ACTION, state.movementStageCounterForTesting());
+        assertTrue(state.recentPointForTesting(lastAnchor));
+        assertTrue(state.recentRowForTesting(lastRow));
+
         state.beginBucketAction();
 
-        assertFalse(state.fillClickOccurred());
         assertEquals(BucketExecutionState.PATH_POINTS_PER_BUCKET_ACTION, state.activeAnchors().size());
+    }
+
+    @Test
+    void changedBucketContextClearsCrossImageRecencyMemory() {
+        BucketExecutionState state = new BucketExecutionState(new Random(1));
+        state.beginImage(NATURAL_ANCHORS, WIDTH);
+        state.beginBucketAction();
+        int lastAnchor = state.activeAnchors().getLast();
+
+        state.beginImage(NATURAL_ANCHORS, WIDTH + 1);
+
+        assertEquals(0, state.movementStageCounterForTesting());
+        assertFalse(state.recentPointForTesting(lastAnchor));
     }
 
     @Test
@@ -86,7 +106,7 @@ class BucketExecutionStateTest {
     @Test
     void naturalPathDoesNotReuseFillClickForFirstThreeBucketActions() {
         BucketExecutionState state = new BucketExecutionState(new Random(3));
-        state.beginImage(NATURAL_ANCHORS, WIDTH);
+        state.beginImage(NATURAL_ANCHORS, FILL_ANCHORS, WIDTH);
 
         state.beginBucketAction();
         int inkSacFill = state.fillClickAnchor();
@@ -96,6 +116,43 @@ class BucketExecutionStateTest {
         int coalTwoFill = state.fillClickAnchor();
 
         assertEquals(3, new HashSet<>(List.of(inkSacFill, coalOneFill, coalTwoFill)).size());
+    }
+
+    @Test
+    void whiteMajorityBatchDoesNotReuseFillClicksForTwentyImages() {
+        assertUniqueFillClicks(20, 1);
+    }
+
+    @Test
+    void blackMajorityWithCoalOffDoesNotReuseInkSacFillClicksForTwentyImages() {
+        assertUniqueFillClicks(20, 1);
+    }
+
+    @Test
+    void coloredMajorityBatchDoesNotReuseBasecoatFillClicksForTwentyImages() {
+        assertUniqueFillClicks(20, 1);
+    }
+
+    @Test
+    void coalEnabledBatchDoesNotReuseFillClicksForTwentyImages() {
+        assertUniqueFillClicks(20, 3);
+    }
+
+    @Test
+    void fillClicksRepeatOnlyAfterFillPoolExhaustion() {
+        List<Integer> tinyFillPool = FILL_ANCHORS.subList(0, 5);
+        BucketExecutionState state = new BucketExecutionState(new Random(4));
+        state.beginImage(NATURAL_ANCHORS, tinyFillPool, WIDTH);
+        HashSet<Integer> firstCycle = new HashSet<>();
+
+        for (int i = 0; i < tinyFillPool.size(); i++) {
+            state.beginBucketAction();
+            assertTrue(firstCycle.add(state.fillClickAnchor()));
+        }
+
+        state.beginBucketAction();
+
+        assertTrue(firstCycle.contains(state.fillClickAnchor()));
     }
 
     @Test
@@ -124,5 +181,20 @@ class BucketExecutionStateTest {
         BucketExecutionState state = new BucketExecutionState(new Random(1));
 
         assertThrows(IllegalArgumentException.class, () -> state.beginImage(TOO_FEW_ANCHORS, WIDTH));
+    }
+
+    private void assertUniqueFillClicks(int images, int bucketActionsPerImage) {
+        BucketExecutionState state = new BucketExecutionState(new Random(11));
+        state.beginImage(NATURAL_ANCHORS, FILL_ANCHORS, WIDTH);
+        HashSet<Integer> fills = new HashSet<>();
+        for (int image = 0; image < images; image++) {
+            state.beginImage(NATURAL_ANCHORS, FILL_ANCHORS, WIDTH);
+            for (int action = 0; action < bucketActionsPerImage; action++) {
+                state.beginBucketAction();
+                assertTrue(fills.add(state.fillClickAnchor()));
+            }
+        }
+        assertEquals(images * bucketActionsPerImage, fills.size());
+        assertEquals(FILL_ANCHORS.size() - fills.size(), state.remainingFillClickAnchorsForTesting());
     }
 }

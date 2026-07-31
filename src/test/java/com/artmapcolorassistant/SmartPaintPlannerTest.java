@@ -179,12 +179,12 @@ class SmartPaintPlannerTest {
     }
 
     @Test
-    void bucketPlanContainsThirtyUniqueInnerCanvasAnchors() {
+    void bucketPlanContainsLargeUniqueInnerCanvasAnchorPool() {
         PreparedSmartPlan plan = new SmartPaintPlanner().prepare(
                 sessionWith(index -> index < 700 ? RED : BLUE), CONFIG);
 
-        assertEquals(30, plan.bucketAimAnchors().size());
-        assertEquals(30, new HashSet<>(plan.bucketAimAnchors()).size());
+        assertTrue(plan.bucketAimAnchors().size() > SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS);
+        assertEquals(plan.bucketAimAnchors().size(), new HashSet<>(plan.bucketAimAnchors()).size());
         for (int index : plan.bucketAimAnchors()) {
             int x = CanvasMath.toX(index, CONFIG.canvasWidth());
             int y = CanvasMath.toY(index, CONFIG.canvasWidth());

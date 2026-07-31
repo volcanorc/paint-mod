@@ -13,6 +13,7 @@ public final class BatchManager {
     private int first;
     private int last;
     private int current;
+    private int nextImageDelayTicks;
     private String nameSuffix = "";
     private String activeFilename;
 
@@ -44,6 +45,7 @@ public final class BatchManager {
         this.first = first;
         this.last = last;
         this.current = first;
+        this.nextImageDelayTicks = 0;
         this.nameSuffix = suffix == null ? "" : suffix.trim();
         controller.setRecoveryBatchSnapshot(snapshot());
         sink.info("Batch started: " + first + ".png to " + last + ".png suffix=\"" + this.nameSuffix + "\".");
@@ -67,6 +69,7 @@ public final class BatchManager {
             sink.info("Batch complete. Painted " + first + ".png through " + last + ".png.");
             active = false;
             waitingForSetup = false;
+            nextImageDelayTicks = 0;
             controller.setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot.none());
             controller.clearRecovery(sink);
             return;
@@ -217,11 +220,20 @@ public final class BatchManager {
     }
 
     private void tickPostPaint(SessionController.MessageSink sink) {
+        if (nextImageDelayTicks > 0) {
+            nextImageDelayTicks--;
+            if (nextImageDelayTicks <= 0) {
+                controller.setRecoveryBatchSnapshot(snapshot());
+                startCurrent(sink);
+            }
+            return;
+        }
         PostPaintWorkflow.Result result = postPaintWorkflow.tick(configManager.config(), sink);
         if (result == PostPaintWorkflow.Result.COMPLETE) {
             if (current > last) {
                 active = false;
                 waitingForSetup = false;
+                nextImageDelayTicks = 0;
                 controller.setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot.none());
                 controller.clearRecovery(sink);
                 sink.info("Batch complete. Painted " + first + ".png through " + last + ".png.");
@@ -229,9 +241,12 @@ public final class BatchManager {
             }
             waitingForSetup = false;
             controller.setRecoveryBatchSnapshot(snapshot());
-            startCurrent(sink);
+            nextImageDelayTicks = BatchNaturalTiming.randomNextImageDelayTicks();
+            controller.saveRecovery(true, "batch waiting natural next-image delay", sink);
+            sink.info("Post-paint setup complete. Waiting a natural delay before starting " + nextFilename() + ".");
         } else if (result == PostPaintWorkflow.Result.FAILED) {
             waitingForSetup = true;
+            nextImageDelayTicks = 0;
             controller.setRecoveryBatchSnapshot(snapshot());
             controller.saveRecovery(true, "post-paint automation paused", sink);
             sink.error("Post-paint automation paused. Fix the issue or finish setup manually, then run #painting batch continue.");
@@ -243,12 +258,14 @@ public final class BatchManager {
             active = false;
             paintingActive = false;
             waitingForSetup = false;
+            nextImageDelayTicks = 0;
             controller.setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot.none());
             return;
         }
         active = true;
         paintingActive = true;
         waitingForSetup = false;
+        nextImageDelayTicks = 0;
         first = progress.batchFirst();
         last = progress.batchLast();
         current = progress.batchCurrent();
@@ -272,6 +289,7 @@ public final class BatchManager {
         active = false;
         paintingActive = false;
         waitingForSetup = false;
+        nextImageDelayTicks = 0;
         first = 0;
         last = 0;
         current = 0;

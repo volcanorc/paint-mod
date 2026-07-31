@@ -22,8 +22,6 @@ import java.util.Set;
 public final class PostPaintWorkflow {
     private static final int SCREEN_TIMEOUT_TICKS = 120;
     private static final int ITEM_TIMEOUT_TICKS = 120;
-    private static final int SHORT_WAIT_TICKS = 8;
-    private static final int PLAYER_VAULT_SLOT_ACTION_DELAY_TICKS = 20;
 
     private final MinecraftClient client;
     private final CalibrationManager calibrationManager;
@@ -153,7 +151,7 @@ public final class PostPaintWorkflow {
         }
         overflowClearAttempts = 0;
         client.player.getInventory().selectedSlot = config.postPaintSaveHotbarSlot();
-        waitTicks = config.postPaintSaveSelectDelayTicks();
+        waitTicks = postPaintShortDelayAtLeast(config.postPaintSaveSelectDelayTicks());
         phase = Phase.WAIT_SAVE_SELECT;
     }
 
@@ -176,7 +174,7 @@ public final class PostPaintWorkflow {
 
     private void waitSaveSelect(ConfigManager.Config config, SessionController.MessageSink sink) {
         phase = Phase.AIM_SAVE_TARGET;
-        aimSettleTicks = Math.max(0, config.postPaintSaveAimSettleTicks());
+        aimSettleTicks = postPaintShortDelayAtLeast(config.postPaintSaveAimSettleTicks());
     }
 
     private void aimSaveTarget(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -204,7 +202,7 @@ public final class PostPaintWorkflow {
         Screen screen = client.currentScreen;
         if (screen != null && !(screen instanceof ChatScreen)) {
             phase = Phase.TYPE_RENAME;
-            waitTicks = config.postPaintRenameOpenDelayTicks();
+            waitTicks = postPaintShortDelayAtLeast(config.postPaintRenameOpenDelayTicks());
             return;
         }
         if (--timeoutTicks <= 0) {
@@ -212,7 +210,7 @@ public final class PostPaintWorkflow {
                 sink.info("Post-paint save GUI did not open yet. Retrying right-click "
                         + rightClickAttempts + "/" + config.postPaintRightClickRetries() + ".");
                 phase = Phase.AIM_SAVE_TARGET;
-                aimSettleTicks = Math.max(0, config.postPaintSaveAimSettleTicks());
+                aimSettleTicks = postPaintShortDelayAtLeast(config.postPaintSaveAimSettleTicks());
                 return;
             }
             fail(sink, "Post-paint save GUI did not open after right-click. Check save item, easel aim, and calibration index 500.");
@@ -229,7 +227,7 @@ public final class PostPaintWorkflow {
             sink.info("Rename text field was not found directly; used keyboard clear fallback.");
         }
         phase = Phase.CLICK_RENAME_POINT;
-        waitTicks = SHORT_WAIT_TICKS;
+        waitTicks = postPaintShortDelayTicks();
     }
 
     private boolean clearAndTypeRename(Screen screen, String name) {
@@ -320,7 +318,7 @@ public final class PostPaintWorkflow {
     private void waitFinishedItem(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (hotbarNonEmpty(config.postPaintFinishedHotbarSlot())) {
             phase = Phase.OPEN_PLAYER_VAULT;
-            waitTicks = SHORT_WAIT_TICKS;
+            waitTicks = postPaintShortDelayTicks();
             return;
         }
         if (--timeoutTicks <= 0) {
@@ -428,7 +426,7 @@ public final class PostPaintWorkflow {
     private void waitPlayerVaultScreen(ConfigManager.Config config, SessionController.MessageSink sink) {
         if (client.currentScreen instanceof HandledScreen<?>) {
             phase = Phase.QUICK_MOVE_FINISHED_ITEM;
-            waitTicks = PLAYER_VAULT_SLOT_ACTION_DELAY_TICKS;
+            waitTicks = postPaintVaultDelayTicks();
             return;
         }
         if (--timeoutTicks <= 0) {
@@ -458,7 +456,7 @@ public final class PostPaintWorkflow {
         }
         pendingVaultTransferStack = sourceStack.copy();
         client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, slot.id, 0, SlotActionType.QUICK_MOVE, client.player);
-        waitTicks = PLAYER_VAULT_SLOT_ACTION_DELAY_TICKS;
+        waitTicks = postPaintVaultDelayTicks();
         timeoutTicks = 1;
         phase = Phase.WAIT_FINISHED_ITEM_REMOVED;
     }
@@ -485,7 +483,7 @@ public final class PostPaintWorkflow {
         }
         client.setScreen(null);
         phase = Phase.SELECT_BLANK_CANVAS;
-        waitTicks = SHORT_WAIT_TICKS;
+        waitTicks = postPaintShortDelayTicks();
     }
 
     private void selectBlankCanvas(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -499,7 +497,7 @@ public final class PostPaintWorkflow {
         }
         client.player.getInventory().selectedSlot = config.postPaintBlankCanvasHotbarSlot();
         phase = Phase.PLACE_BLANK_CANVAS;
-        waitTicks = SHORT_WAIT_TICKS;
+        waitTicks = postPaintShortDelayTicks();
     }
 
     private void placeBlankCanvas(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -510,7 +508,7 @@ public final class PostPaintWorkflow {
         phase = config.postPaintFunJumpsEnabled() && config.postPaintFunJumpCount() > 0
                 ? Phase.FUN_JUMP_START
                 : Phase.ENTER_EASEL;
-        waitTicks = SHORT_WAIT_TICKS;
+        waitTicks = postPaintShortDelayTicks();
     }
 
     private void startFunJumps(ConfigManager.Config config) {
@@ -539,7 +537,7 @@ public final class PostPaintWorkflow {
         funJumpsRemaining--;
         if (funJumpsRemaining <= 0) {
             phase = Phase.ENTER_EASEL;
-            waitTicks = SHORT_WAIT_TICKS;
+            waitTicks = postPaintShortDelayTicks();
             return;
         }
         funJumpGapTicksRemaining = Math.max(0, config.postPaintFunJumpGapTicks());
@@ -560,8 +558,8 @@ public final class PostPaintWorkflow {
         }
         rightClick();
         phase = Phase.COMPLETE;
-        waitTicks = SHORT_WAIT_TICKS;
-        sink.info("Post-paint setup complete. Starting next batch image.");
+        waitTicks = postPaintShortDelayTicks();
+        sink.info("Post-paint setup complete.");
     }
 
     private boolean aimAtConfiguredIndex(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -629,6 +627,18 @@ public final class PostPaintWorkflow {
 
     private int overflowDelayTicks() {
         return PostPaintOverflowPolicy.randomDelayTicks();
+    }
+
+    private int postPaintShortDelayTicks() {
+        return PostPaintNaturalTiming.shortDelayTicks();
+    }
+
+    private int postPaintShortDelayAtLeast(int minimumTicks) {
+        return PostPaintNaturalTiming.shortDelayAtLeast(minimumTicks);
+    }
+
+    private int postPaintVaultDelayTicks() {
+        return PostPaintNaturalTiming.vaultDelayTicks();
     }
 
     private String saveName() {

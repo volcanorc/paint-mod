@@ -41,6 +41,8 @@ public final class SmartPainter {
     private int completedActionBoundary;
     private int recoveredActionBoundary;
     private List<Integer> resolvedBucketAnchors = List.of();
+    private List<Integer> resolvedBucketFillAnchors = List.of();
+    private boolean finishCooldownUsed;
 
     public SmartPainter(MinecraftClient client, SessionController controller, CalibrationManager calibrationManager) {
         this.client = client;
@@ -113,7 +115,7 @@ public final class SmartPainter {
         }
 
         preparedPlan = plan;
-        bucketExecution.beginImage(resolvedBucketAnchors, config.canvasWidth());
+        bucketExecution.beginImage(resolvedBucketAnchors, resolvedBucketFillAnchors, config.canvasWidth());
         canvas = SmartCanvas.fresh(session, config);
         actions.clear();
         actions.add(plan.baseCoat());
@@ -131,7 +133,9 @@ public final class SmartPainter {
         bucketHandsSwapped = false;
         bucketDisabledReason = null;
         resolvedBucketAnchors = List.of();
+        resolvedBucketFillAnchors = List.of();
         completedActionBoundary = 0;
+        finishCooldownUsed = false;
         running = true;
         paused = false;
         applyRecoveredBoundary();
@@ -161,7 +165,12 @@ public final class SmartPainter {
         if (bucketAnchors.isEmpty()) {
             return "Smart bucket needs 30 exact natural bucket anchors; exact calibration is incomplete";
         }
+        List<Integer> bucketFillAnchors = resolveBucketFillAnchors(config);
+        if (bucketFillAnchors.isEmpty()) {
+            return "Smart bucket needs at least one exact fill-click anchor; exact calibration is incomplete";
+        }
         resolvedBucketAnchors = bucketAnchors;
+        resolvedBucketFillAnchors = bucketFillAnchors;
         for (int anchor : bucketAnchors) {
             PaintStep step = controller.session().steps().get(anchor);
             if (!calibrationManager.hasExactFor(step, config)) {
@@ -279,6 +288,7 @@ public final class SmartPainter {
             case DRAG_AIM -> dragAim(config, sink);
             case DRAG_RELEASE -> dragRelease(config);
             case APPLY -> applyAction(config, sink);
+            case FINISH_COOLDOWN -> completeSmart(sink);
             case IDLE -> { }
         }
     }
@@ -286,12 +296,25 @@ public final class SmartPainter {
     private void plan(SessionController.MessageSink sink) {
         action = actions.pollFirst();
         if (action == null) {
-            running = false;
-            phase = Phase.IDLE;
-            controller.finishSmart(sink);
+            if (shouldUseNaturalFinishCooldown()) {
+                finishCooldownUsed = true;
+                waitTicks = SmartFinishCooldown.randomDelayTicks();
+                phase = Phase.FINISH_COOLDOWN;
+                controller.saveRecovery(true, "smart waiting natural finish cooldown", completedActionBoundary, false,
+                        sink);
+                sink.info("Smart paint bucket-only finish: waiting a natural cooldown before save/post-paint.");
+                return;
+            }
+            completeSmart(sink);
             return;
         }
         phase = Phase.SELECT_ITEM;
+    }
+
+    private void completeSmart(SessionController.MessageSink sink) {
+        running = false;
+        phase = Phase.IDLE;
+        controller.finishSmart(sink);
     }
 
     private void selectItem(SessionController.MessageSink sink) {
@@ -589,11 +612,20 @@ public final class SmartPainter {
         if (session == null) {
             return List.of();
         }
-        List<Integer> exactNatural = exactAnchors(plan.bucketAimAnchors(), config, SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS);
+        List<Integer> exactNatural = exactAnchors(plan.bucketAimAnchors(), config, Integer.MAX_VALUE);
         if (exactNatural.size() >= SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS) {
-            return exactNatural.subList(0, SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS);
+            return exactNatural;
         }
         return List.of();
+    }
+
+    private List<Integer> resolveBucketFillAnchors(ConfigManager.Config config) {
+        PaintSession session = controller.session();
+        if (session == null) {
+            return List.of();
+        }
+        return exactAnchors(SmartBucketAnchorPlanner.fillClickCandidates(config.canvasWidth(), config.canvasHeight()),
+                config, Integer.MAX_VALUE);
     }
 
     private List<Integer> exactAnchors(List<Integer> candidates, ConfigManager.Config config, int limit) {
@@ -631,6 +663,17 @@ public final class SmartPainter {
 
     private Phase nextPaintPhase() {
         return action.type() == PaintActionType.DRAG_RUN ? Phase.DRAG_HOLD : Phase.CLICK;
+    }
+
+    private boolean shouldUseNaturalFinishCooldown() {
+        return !finishCooldownUsed && completedActionBoundary > 0 && plannedActionsWereBucketOnly();
+    }
+
+    private boolean plannedActionsWereBucketOnly() {
+        if (preparedPlan == null || preparedPlan.baseCoat() == null || !preparedPlan.baseCoat().bucket()) {
+            return false;
+        }
+        return preparedPlan.actions().stream().allMatch(PaintAction::bucket);
     }
 
     private PaintStep seedStep() {
@@ -714,6 +757,7 @@ public final class SmartPainter {
         DRAG_HOLD,
         DRAG_AIM,
         DRAG_RELEASE,
-        APPLY
+        APPLY,
+        FINISH_COOLDOWN
     }
 }

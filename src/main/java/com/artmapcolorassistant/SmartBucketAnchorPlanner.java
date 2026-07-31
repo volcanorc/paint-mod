@@ -41,6 +41,23 @@ final class SmartBucketAnchorPlanner {
         return List.copyOf(indexes);
     }
 
+    static List<Integer> fillClickCandidates(int width, int height) {
+        if (width < 3 || height < 3) {
+            return List.of();
+        }
+        ArrayList<Integer> indexes = new ArrayList<>();
+        int innerMinX = width >= 8 ? 2 : 1;
+        int innerMaxX = width >= 8 ? width - 3 : width - 2;
+        int innerMinY = height >= 8 ? 2 : 1;
+        int innerMaxY = height >= 8 ? height - 3 : height - 2;
+        for (int y = innerMinY; y <= innerMaxY; y++) {
+            for (int x = innerMinX; x <= innerMaxX; x++) {
+                indexes.add(CanvasMath.toIndex(x, y, width));
+            }
+        }
+        return List.copyOf(indexes);
+    }
+
     private static int spread(int min, int max, int index, int count) {
         if (count <= 1) {
             return (min + max) / 2;

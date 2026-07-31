@@ -252,8 +252,7 @@ public final class SmartPaintPlanner {
     }
 
     private List<Integer> scriptedAnchors(SmartCanvas canvas) {
-        List<Integer> natural = SmartBucketAnchorPlanner.naturalCandidates(canvas.width(), canvas.height());
-        return natural;
+        return SmartBucketAnchorPlanner.fillClickCandidates(canvas.width(), canvas.height());
     }
 
     private SmartPreview preview(int oldTicks, int originalWrong, List<PaintAction> actions,
