@@ -134,7 +134,7 @@ public final class BatchManager {
             current++;
             controller.setRecoveryBatchSnapshot(snapshot());
             controller.saveRecovery(true, "post-paint automation starting", sink);
-            postPaintWorkflow.start(completedNumber, nameSuffix, sink);
+            postPaintWorkflow.start(completedNumber, nameSuffix, controller.consumePreferredPostPaintAimIndex(), sink);
             return;
         }
         waitingForSetup = true;

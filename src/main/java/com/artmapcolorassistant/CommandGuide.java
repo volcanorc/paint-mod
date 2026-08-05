@@ -25,6 +25,7 @@ public final class CommandGuide {
             new Entry("smart", "Smart hybrid painting controls."),
             new Entry("bucket", "Smart bucket timing and guard controls."),
             new Entry("coalblack", "Smart Ink Sac plus Coal deep-black bucket controls."),
+            new Entry("fakeclick", "Experimental same-color gestures for repeated bucket-heavy images."),
             new Entry("calibrate", "Exact calibration controls."),
             new Entry("calibration", "Portable calibration mode."),
             new Entry("cal", "Corner calibration and aim test."),
@@ -68,6 +69,11 @@ public final class CommandGuide {
             new Entry("off", "Disable Coal deep-black bucket passes."),
             new Entry("status", "Show deep-black bucket settings."),
             new Entry("passes 1|2", "Set Coal bucket darkening passes.")
+    );
+    private static final List<Entry> FAKECLICK = List.of(
+            new Entry("on", "Enable same-color fake gestures after repeated bucket-heavy images."),
+            new Entry("off", "Disable same-color fake gestures."),
+            new Entry("status", "Show fake-click gesture settings.")
     );
     private static final List<Entry> PALETTE = List.of(
             new Entry("status", "Show loaded and usable colors."),
@@ -206,6 +212,10 @@ public final class CommandGuide {
                     leaf("off", "Disable Coal deep-black bucket passes."),
                     leaf("status", "Show Coal deep-black settings."),
                     argument("passes", "Set Coal deep-black bucket passes.", "<1|2>")),
+            branch("fakeclick", "Experimental same-color gestures for repeated bucket-heavy images.",
+                    leaf("on", "Enable fake-click gestures."),
+                    leaf("off", "Disable fake-click gestures."),
+                    leaf("status", "Show fake-click settings.")),
             branch("calibrate", "Exact calibration controls.",
                     argument("start", "Start a fresh exact calibration.", "<name>"),
                     argument("continue", "Continue a saved calibration.", "<name>"),
@@ -265,6 +275,9 @@ public final class CommandGuide {
         }
         if (lower.startsWith("coalblack")) {
             return COALBLACK;
+        }
+        if (lower.startsWith("fakeclick")) {
+            return FAKECLICK;
         }
         if (lower.startsWith("palette")) {
             return PALETTE;

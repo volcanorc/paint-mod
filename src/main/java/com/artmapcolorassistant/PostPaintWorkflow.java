@@ -13,10 +13,12 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.ArrayList;
 import java.lang.reflect.Field;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Set;
 
 public final class PostPaintWorkflow {
@@ -36,6 +38,7 @@ public final class PostPaintWorkflow {
     private int funJumpPressTicksRemaining;
     private int funJumpGapTicksRemaining;
     private int overflowClearAttempts;
+    private int preferredAimIndex = -1;
     private boolean funJumpKeyHeld;
     private ItemStack pendingVaultTransferStack = ItemStack.EMPTY;
     private Phase phase = Phase.IDLE;
@@ -57,9 +60,14 @@ public final class PostPaintWorkflow {
     }
 
     public void start(int imageNumber, String suffix, SessionController.MessageSink sink) {
+        start(imageNumber, suffix, -1, sink);
+    }
+
+    public void start(int imageNumber, String suffix, int preferredAimIndex, SessionController.MessageSink sink) {
         this.active = true;
         this.imageNumber = imageNumber;
         this.suffix = suffix == null ? "" : suffix.trim();
+        this.preferredAimIndex = preferredAimIndex;
         this.waitTicks = 0;
         this.timeoutTicks = 0;
         this.aimSettleTicks = 0;
@@ -85,6 +93,7 @@ public final class PostPaintWorkflow {
         funJumpPressTicksRemaining = 0;
         funJumpGapTicksRemaining = 0;
         overflowClearAttempts = 0;
+        preferredAimIndex = -1;
         pendingVaultTransferStack = ItemStack.EMPTY;
         phase = Phase.IDLE;
     }
@@ -564,18 +573,51 @@ public final class PostPaintWorkflow {
 
     private boolean aimAtConfiguredIndex(ConfigManager.Config config, SessionController.MessageSink sink) {
         int total = config.canvasWidth() * config.canvasHeight();
-        int index = config.postPaintAimCalibrationIndex();
-        if (index < 0 || index >= total) {
+        if (config.postPaintAimCalibrationIndex() < 0 || config.postPaintAimCalibrationIndex() >= total) {
             fail(sink, "postPaintAimCalibrationIndex must be 0-" + (total - 1) + ".");
             return false;
         }
-        int x = CanvasMath.toX(index, config.canvasWidth());
-        int y = CanvasMath.toY(index, config.canvasWidth());
-        if (!calibrationManager.aimAt(x, y, config)) {
-            fail(sink, "Could not aim at calibration index " + index + ". Load exact calibration or choose another index.");
-            return false;
+        for (int index : postPaintAimCandidates(config)) {
+            int x = CanvasMath.toX(index, config.canvasWidth());
+            int y = CanvasMath.toY(index, config.canvasWidth());
+            if (calibrationManager.aimAt(x, y, config)) {
+                return true;
+            }
         }
-        return true;
+        fail(sink, "Could not aim near the last painted point or at calibration index "
+                + config.postPaintAimCalibrationIndex() + ". Load exact calibration or choose another index.");
+        return false;
+    }
+
+    private List<Integer> postPaintAimCandidates(ConfigManager.Config config) {
+        ArrayList<Integer> candidates = new ArrayList<>();
+        int total = config.canvasWidth() * config.canvasHeight();
+        if (preferredAimIndex >= 0 && preferredAimIndex < total) {
+            int preferredX = CanvasMath.toX(preferredAimIndex, config.canvasWidth());
+            int preferredY = CanvasMath.toY(preferredAimIndex, config.canvasWidth());
+            for (int radius = 0; radius <= 3; radius++) {
+                for (int dy = -radius; dy <= radius; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        if (Math.abs(dx) + Math.abs(dy) != radius) {
+                            continue;
+                        }
+                        int x = preferredX + dx;
+                        int y = preferredY + dy;
+                        if (x < 0 || y < 0 || x >= config.canvasWidth() || y >= config.canvasHeight()) {
+                            continue;
+                        }
+                        int candidate = CanvasMath.toIndex(x, y, config.canvasWidth());
+                        if (!candidates.contains(candidate)) {
+                            candidates.add(candidate);
+                        }
+                    }
+                }
+            }
+        }
+        if (!candidates.contains(config.postPaintAimCalibrationIndex())) {
+            candidates.add(config.postPaintAimCalibrationIndex());
+        }
+        return List.copyOf(candidates);
     }
 
     private void clickScreenPoint(Screen screen, RecordedClickPoint point) {

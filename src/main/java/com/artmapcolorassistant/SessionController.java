@@ -18,6 +18,7 @@ public final class SessionController {
     private final RecoveryStore recoveryStore;
     private PaintSession session;
     private int switchDelayTicks = -1;
+    private int preferredPostPaintAimIndex = -1;
     private RecoveryProgress.BatchSnapshot recoveryBatchSnapshot = RecoveryProgress.BatchSnapshot.none();
 
     public SessionController(ConfigManager configManager, ImageLoader imageLoader, InventoryHelper inventoryHelper, ColorMatcher colorMatcher) {
@@ -47,6 +48,16 @@ public final class SessionController {
 
     public void setRecoveryBatchSnapshot(RecoveryProgress.BatchSnapshot snapshot) {
         recoveryBatchSnapshot = snapshot == null ? RecoveryProgress.BatchSnapshot.none() : snapshot;
+    }
+
+    public void setPreferredPostPaintAimIndex(int index) {
+        preferredPostPaintAimIndex = index;
+    }
+
+    public int consumePreferredPostPaintAimIndex() {
+        int index = preferredPostPaintAimIndex;
+        preferredPostPaintAimIndex = -1;
+        return index;
     }
 
     public boolean start(String filename, MessageSink sink) {
@@ -81,6 +92,7 @@ public final class SessionController {
             List<ArtMapColor> palette = colorMatcher.buildMatchingPalette(config, inventory);
             List<PaintStep> steps = colorMatcher.convert(image, config, palette);
             session = new PaintSession(filename, steps, palette);
+            preferredPostPaintAimIndex = -1;
             if (index < 0 || index >= steps.size()) {
                 sink.error("Saved recovery index is out of range for " + filename + ".");
                 session = null;

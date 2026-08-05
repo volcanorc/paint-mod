@@ -181,6 +181,22 @@ public final class ConfigManager {
         int postPaintFunJumpGapTicks = Math.max(0, intValue(root, "postPaintFunJumpGapTicks", defaults.postPaintFunJumpGapTicks));
         RecordedClickPoint postPaintRenameClickPoint = parseClickPoint(root, "postPaintRenameClickPoint");
         RecordedClickPoint postPaintPv2ClickPoint = parseClickPoint(root, "postPaintPv2ClickPoint");
+        boolean smartFakeClickEnabled = boolValue(root, "smartFakeClickEnabled", defaults.smartFakeClickEnabled);
+        int smartFakeClickStreakThreshold = Math.max(1,
+                intValue(root, "smartFakeClickStreakThreshold", defaults.smartFakeClickStreakThreshold));
+        double smartFakeClickDominanceThreshold = clampDouble(
+                doubleValue(root, "smartFakeClickDominanceThreshold", defaults.smartFakeClickDominanceThreshold),
+                0.50D, 1.0D);
+        int smartFakeClickMaxDetailPixels = Math.max(0,
+                intValue(root, "smartFakeClickMaxDetailPixels", defaults.smartFakeClickMaxDetailPixels));
+        int smartFakeClickMinSteps = Math.max(1,
+                intValue(root, "smartFakeClickMinSteps", defaults.smartFakeClickMinSteps));
+        int smartFakeClickMaxSteps = Math.max(smartFakeClickMinSteps,
+                intValue(root, "smartFakeClickMaxSteps", defaults.smartFakeClickMaxSteps));
+        int smartFakeClickMinColorSwaps = Math.max(0,
+                intValue(root, "smartFakeClickMinColorSwaps", defaults.smartFakeClickMinColorSwaps));
+        int smartFakeClickMaxColorSwaps = Math.max(smartFakeClickMinColorSwaps,
+                intValue(root, "smartFakeClickMaxColorSwaps", defaults.smartFakeClickMaxColorSwaps));
 
         List<ArtMapColor> colors = new ArrayList<>();
         JsonArray array = root.has("artMapColors") && root.get("artMapColors").isJsonArray()
@@ -244,7 +260,10 @@ public final class ConfigManager {
                 postPaintSaveSelectDelayTicks, postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks,
                 postPaintRightClickRetries, postPaintFunJumpsEnabled, postPaintFunJumpCount,
                 postPaintFunJumpPressTicks, postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                postPaintPv2ClickPoint, List.copyOf(colors),
+                postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                smartFakeClickMaxColorSwaps, List.copyOf(colors),
                 overrideResult.colors());
     }
 
@@ -363,6 +382,14 @@ public final class ConfigManager {
         root.addProperty("postPaintFunJumpGapTicks", value.postPaintFunJumpGapTicks);
         addClickPoint(root, "postPaintRenameClickPoint", value.postPaintRenameClickPoint);
         addClickPoint(root, "postPaintPv2ClickPoint", value.postPaintPv2ClickPoint);
+        root.addProperty("smartFakeClickEnabled", value.smartFakeClickEnabled);
+        root.addProperty("smartFakeClickStreakThreshold", value.smartFakeClickStreakThreshold);
+        root.addProperty("smartFakeClickDominanceThreshold", value.smartFakeClickDominanceThreshold);
+        root.addProperty("smartFakeClickMaxDetailPixels", value.smartFakeClickMaxDetailPixels);
+        root.addProperty("smartFakeClickMinSteps", value.smartFakeClickMinSteps);
+        root.addProperty("smartFakeClickMaxSteps", value.smartFakeClickMaxSteps);
+        root.addProperty("smartFakeClickMinColorSwaps", value.smartFakeClickMinColorSwaps);
+        root.addProperty("smartFakeClickMaxColorSwaps", value.smartFakeClickMaxColorSwaps);
         JsonArray colors = new JsonArray();
         for (ArtMapColor color : value.artMapColors) {
             JsonObject object = new JsonObject();
@@ -522,6 +549,11 @@ public final class ConfigManager {
     public void setBucketNaturalDelayRange(int minTicks, int maxTicks, Consumer<Text> warningSink) {
         config = config.withBucketNaturalSettings(config.bucketNaturalMovementEnabled(), minTicks, maxTicks);
         saveConfigChange("bucket natural delay", warningSink);
+    }
+
+    public void setSmartFakeClickEnabled(boolean enabled, Consumer<Text> warningSink) {
+        config = config.withSmartFakeClickEnabled(enabled);
+        saveConfigChange("smart fake-click gestures", warningSink);
     }
 
     public void setPostPaintRenameClickPoint(RecordedClickPoint point, Consumer<Text> warningSink) {
@@ -809,6 +841,14 @@ public final class ConfigManager {
             int postPaintFunJumpGapTicks,
             RecordedClickPoint postPaintRenameClickPoint,
             RecordedClickPoint postPaintPv2ClickPoint,
+            boolean smartFakeClickEnabled,
+            int smartFakeClickStreakThreshold,
+            double smartFakeClickDominanceThreshold,
+            int smartFakeClickMaxDetailPixels,
+            int smartFakeClickMinSteps,
+            int smartFakeClickMaxSteps,
+            int smartFakeClickMinColorSwaps,
+            int smartFakeClickMaxColorSwaps,
             List<ArtMapColor> artMapColors,
             List<ArtMapColor> effectiveArtMapColors
     ) {
@@ -860,7 +900,10 @@ public final class ConfigManager {
                     postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
                     postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
                     postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public Config withPostPaintAutomationEnabled(boolean value) {
@@ -891,7 +934,10 @@ public final class ConfigManager {
                     postPaintSaveSelectDelayTicks, postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks,
                     postPaintRightClickRetries, postPaintFunJumpsEnabled, postPaintFunJumpCount,
                     postPaintFunJumpPressTicks, postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public Config withPortableExactCalibrationMode(boolean value) {
@@ -918,7 +964,10 @@ public final class ConfigManager {
                     postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
                     postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
                     postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public Config withPaintingModePreset(PaintingMode mode) {
@@ -954,7 +1003,10 @@ public final class ConfigManager {
                     postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
                     postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
                     postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public Config withAutoDragSameColorRuns(boolean value) {
@@ -981,7 +1033,10 @@ public final class ConfigManager {
                     postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
                     postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
                     postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public Config withPostPaintRenameClickPoint(RecordedClickPoint value) {
@@ -1017,7 +1072,10 @@ public final class ConfigManager {
                     postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
                     postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
                     postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public Config withSmartCoalBlackSettings(boolean enabled, int passes, double dominanceThreshold) {
@@ -1045,7 +1103,10 @@ public final class ConfigManager {
                     postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
                     postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
                     postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public Config withBucketSettings(boolean enabled, int repeats, int gapTicks, int swapDelayTicks,
@@ -1073,7 +1134,10 @@ public final class ConfigManager {
                     postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
                     postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
                     postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public Config withBucketNaturalSettings(boolean enabled, int minTicks, int maxTicks) {
@@ -1101,7 +1165,10 @@ public final class ConfigManager {
                     postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
                     postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
                     postPaintFunJumpGapTicks, postPaintRenameClickPoint,
-                    postPaintPv2ClickPoint, artMapColors, effectiveArtMapColors);
+                    postPaintPv2ClickPoint, smartFakeClickEnabled, smartFakeClickStreakThreshold,
+                    smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels,
+                    smartFakeClickMinSteps, smartFakeClickMaxSteps, smartFakeClickMinColorSwaps,
+                    smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         private Config copy(boolean enabled, RecordedClickPoint renamePoint, RecordedClickPoint pv2Point) {
@@ -1127,7 +1194,38 @@ public final class ConfigManager {
                     postPaintVaultCommand, postPaintSaveSelectDelayTicks, postPaintSaveAimSettleTicks,
                     postPaintRenameOpenDelayTicks, postPaintRightClickRetries, postPaintFunJumpsEnabled,
                     postPaintFunJumpCount, postPaintFunJumpPressTicks, postPaintFunJumpGapTicks, renamePoint, pv2Point,
-                    artMapColors, effectiveArtMapColors);
+                    smartFakeClickEnabled, smartFakeClickStreakThreshold, smartFakeClickDominanceThreshold,
+                    smartFakeClickMaxDetailPixels, smartFakeClickMinSteps, smartFakeClickMaxSteps,
+                    smartFakeClickMinColorSwaps, smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
+        }
+
+        public Config withSmartFakeClickEnabled(boolean value) {
+            return new Config(canvasWidth, canvasHeight, reservedHotbarSlot, autoSwapFromInventory,
+                    advanceOnLeftClick, advanceOnRightClick, onlyAdvanceWhenCrosshairTargetExists,
+                    alphaThreshold, transparentPixelMode, debug, useOnlyInventoryAvailableColors, colorMatchMode,
+                    includeToolsInColorMatching, confirmMode, paintingMode, autoPaintDefaultDelayTicks,
+                    autoPaintMinDelayTicks, autoPaintClickButton, autoAimSettleTicks,
+                    autoAimToleranceDegrees, autoRequireCalibration, autoLockCameraDuringAuto, portableExactCalibrationMode,
+                    useBundledDirectionalCalibration, defaultBundledCalibrationPrefix,
+                    autoDetectCalibrationDirectionOnAutoStart, cardinalDirectionToleranceDegrees,
+                    autoEnablePortableForBundledCalibration, autoDragSameColorRuns,
+                    autoDragMinRunLength, autoDragPixelTicks, autoDragRequireExactCalibration,
+                    autoDragStartHoldTicks, autoDragEndHoldTicks, smartEnabled, smartMode,
+                    smartBaseCoatEnabled, smartBucketThreshold, smartDragThreshold,
+                    smartCoalBlackBasecoatEnabled, smartCoalBlackPasses, smartCoalBlackDominanceThreshold, bucketEnabled,
+                    bucketClickRepeats, bucketClickGapTicks, bucketSwapDelayTicks, bucketAimSettleTicks,
+                    bucketAfterDelayTicks, bucketNaturalMovementEnabled, bucketNaturalDelayMinTicks,
+                    bucketNaturalDelayMaxTicks, selectedCalibrationName,
+                    serverColorOverridesEnabled, serverColorOverrides, batchAutoStartAfterContinue,
+                    batchDefaultSpeedTicks, batchEnableDrag, postPaintAutomationEnabled,
+                    postPaintSaveHotbarSlot, postPaintFinishedHotbarSlot, postPaintBlankCanvasHotbarSlot,
+                    postPaintAimCalibrationIndex, postPaintVaultCommand, postPaintSaveSelectDelayTicks,
+                    postPaintSaveAimSettleTicks, postPaintRenameOpenDelayTicks, postPaintRightClickRetries,
+                    postPaintFunJumpsEnabled, postPaintFunJumpCount, postPaintFunJumpPressTicks,
+                    postPaintFunJumpGapTicks, postPaintRenameClickPoint, postPaintPv2ClickPoint,
+                    value, smartFakeClickStreakThreshold, smartFakeClickDominanceThreshold,
+                    smartFakeClickMaxDetailPixels, smartFakeClickMinSteps, smartFakeClickMaxSteps,
+                    smartFakeClickMinColorSwaps, smartFakeClickMaxColorSwaps, artMapColors, effectiveArtMapColors);
         }
 
         public static Config defaults() {
@@ -1161,6 +1259,7 @@ public final class ConfigManager {
                     true, 10, 2, true, 2, 0.55D, true, 10, 20, 16, 24, 10,
                     true, 10, 32, "ee", true, List.copyOf(overrides),
                     true, 5, true, true, 2, 0, 1, 500, "/pv 2", 2, 3, 20, 2, true, 5, 2, 4, null, null,
+                    true, 3, 0.90D, 64, 5, 10, 2, 3,
                     List.copyOf(colors), overrideResult.colors());
         }
     }

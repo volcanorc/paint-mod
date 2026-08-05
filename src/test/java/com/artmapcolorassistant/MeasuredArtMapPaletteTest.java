@@ -168,6 +168,10 @@ class MeasuredArtMapPaletteTest {
                 config.postPaintRenameOpenDelayTicks(), config.postPaintRightClickRetries(),
                 config.postPaintFunJumpsEnabled(), config.postPaintFunJumpCount(), config.postPaintFunJumpPressTicks(),
                 config.postPaintFunJumpGapTicks(), config.postPaintRenameClickPoint(),
-                config.postPaintPv2ClickPoint(), config.artMapColors(), config.effectiveArtMapColors());
+                config.postPaintPv2ClickPoint(), config.smartFakeClickEnabled(),
+                config.smartFakeClickStreakThreshold(), config.smartFakeClickDominanceThreshold(),
+                config.smartFakeClickMaxDetailPixels(), config.smartFakeClickMinSteps(),
+                config.smartFakeClickMaxSteps(), config.smartFakeClickMinColorSwaps(),
+                config.smartFakeClickMaxColorSwaps(), config.artMapColors(), config.effectiveArtMapColors());
     }
 }

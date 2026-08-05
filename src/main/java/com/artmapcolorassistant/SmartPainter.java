@@ -20,6 +20,7 @@ public final class SmartPainter {
     private final ArrayDeque<PaintAction> actions = new ArrayDeque<>();
     private final BucketExecutionState bucketExecution = new BucketExecutionState();
     private final BucketNaturalTiming bucketTiming = new BucketNaturalTiming();
+    private final SmartFakeClickState fakeClickState = new SmartFakeClickState();
     private final SmartBucketSwapRetryPolicy bucketRetryPolicy =
             new SmartBucketSwapRetryPolicy(MAX_BUCKET_HAND_SWAP_RETRIES);
     private final SmartWaypointClock dragWaypointClock = new SmartWaypointClock();
@@ -43,6 +44,9 @@ public final class SmartPainter {
     private List<Integer> resolvedBucketAnchors = List.of();
     private List<Integer> resolvedBucketFillAnchors = List.of();
     private boolean finishCooldownUsed;
+    private boolean fakeClickQueuedForImage;
+    private SmartFakeClickState.Decision fakeClickDecision =
+            new SmartFakeClickState.Decision(new SmartFakeClickState.Analysis(0, 0, 0.0D, false), 0, false);
 
     public SmartPainter(MinecraftClient client, SessionController controller, CalibrationManager calibrationManager) {
         this.client = client;
@@ -74,6 +78,9 @@ public final class SmartPainter {
                 + " path=human-walk-full-pool"
                 + " coalBlack=" + (preparedPlan != null && preparedPlan.preview().coalBlackPlanned())
                 + " coalPasses=" + (preparedPlan == null ? 0 : preparedPlan.preview().coalBlackPasses())
+                + " fakeClick=" + config.smartFakeClickEnabled()
+                + " fakeStreak=" + fakeClickDecision.streak()
+                + " fakeQueued=" + fakeClickQueuedForImage
                 + " hands={" + controller.bucketHandStatus(dominant) + "}"
                 + (bucketDisabledReason == null ? "" : " blocked=\"" + bucketDisabledReason + "\"");
     }
@@ -116,10 +123,33 @@ public final class SmartPainter {
 
         preparedPlan = plan;
         bucketExecution.beginImage(resolvedBucketAnchors, resolvedBucketFillAnchors, config.canvasWidth());
+        fakeClickDecision = fakeClickState.beginImage(plan, config);
         canvas = SmartCanvas.fresh(session, config);
         actions.clear();
         actions.add(plan.baseCoat());
-        actions.addAll(plan.actions());
+        List<PaintAction> fakeActions = fakeClickDecision.runFakeClick()
+                ? fakeClickState.generateActions(plan, config, availablePaintColors(config),
+                resolvedBucketFillAnchors, config.canvasWidth())
+                : List.of();
+        fakeClickQueuedForImage = !fakeActions.isEmpty();
+        for (PaintAction plannedAction : plan.actions()) {
+            if (plannedAction.bucket()) {
+                actions.add(plannedAction);
+            }
+        }
+        actions.addAll(fakeActions);
+        for (PaintAction plannedAction : plan.actions()) {
+            if (!plannedAction.bucket()) {
+                actions.add(plannedAction);
+            }
+        }
+        if (fakeClickQueuedForImage) {
+            sink.info("Smart fake-click gesture queued after bucket-heavy streak "
+                    + fakeClickDecision.streak() + ": detailPixels="
+                    + fakeClickDecision.analysis().detailPixels()
+                    + " dominance=" + Math.round(fakeClickDecision.analysis().baseCoatDominance() * 100.0D)
+                    + "%.");
+        }
         action = null;
         phase = Phase.PLAN;
         waitTicks = 0;
@@ -345,6 +375,9 @@ public final class SmartPainter {
                     sink);
             bucketPhaseTicks = bucketDelay(config, config.bucketColorSelectDelayTicks());
             phase = Phase.BUCKET_STAGE_AIM;
+        } else if (action.type() == PaintActionType.FAKE_COLOR_SWAP) {
+            waitTicks = bucketDelay(config, 0);
+            phase = Phase.APPLY;
         } else {
             phase = Phase.AIM;
         }
@@ -446,6 +479,7 @@ public final class SmartPainter {
         }
         if (bucketExecution.markFillClickIfFirst()) {
             performClick(AutoClickButton.LEFT);
+            controller.setPreferredPostPaintAimIndex(anchor.index());
         }
         bucketPhaseTicks = bucketDelay(config, config.bucketPostFillDelayTicks());
         phase = Phase.BUCKET_POST_FILL;
@@ -596,6 +630,9 @@ public final class SmartPainter {
         if (action != null) {
             boolean bucket = action.bucket();
             canvas.apply(action);
+            if (!bucket && action.type() != PaintActionType.FAKE_COLOR_SWAP && action.endIndex() >= 0) {
+                controller.setPreferredPostPaintAimIndex(action.endIndex());
+            }
             completedActionBoundary++;
             controller.saveRecovery(bucket, null, completedActionBoundary, false,
                     sink);
@@ -668,7 +705,8 @@ public final class SmartPainter {
     }
 
     private boolean shouldUseNaturalFinishCooldown() {
-        return !finishCooldownUsed && completedActionBoundary > 0 && plannedActionsWereBucketOnly();
+        return !finishCooldownUsed && !fakeClickQueuedForImage
+                && completedActionBoundary > 0 && plannedActionsWereBucketOnly();
     }
 
     private boolean plannedActionsWereBucketOnly() {
@@ -676,6 +714,16 @@ public final class SmartPainter {
             return false;
         }
         return preparedPlan.actions().stream().allMatch(PaintAction::bucket);
+    }
+
+    private List<ArtMapColor> availablePaintColors(ConfigManager.Config config) {
+        ArrayList<ArtMapColor> result = new ArrayList<>();
+        for (ArtMapColor color : config.effectiveArtMapColors()) {
+            if (color != null && !color.tool() && controller.itemExists(color)) {
+                result.add(color);
+            }
+        }
+        return List.copyOf(result);
     }
 
     private PaintStep seedStep() {

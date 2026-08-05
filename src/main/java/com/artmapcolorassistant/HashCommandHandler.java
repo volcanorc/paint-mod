@@ -154,6 +154,7 @@ public final class HashCommandHandler {
             case "smart" -> handleSmart(parts, sink);
             case "bucket" -> handleBucket(parts, sink);
             case "coalblack" -> handleCoalBlack(parts, sink);
+            case "fakeclick" -> handleFakeClick(parts, sink);
             case "palette" -> handlePalette(parts, sink);
             case "batch" -> handleBatch(parts, sink);
             case "recovery" -> handleRecovery(parts, sink);
@@ -373,6 +374,8 @@ public final class HashCommandHandler {
                 sink.info(readiness("basecoat on", config.smartBaseCoatEnabled()));
                 sink.info(readiness("coal black bucket " + (config.smartCoalBlackBasecoatEnabled() ? "on" : "off")
                         + " passes " + config.smartCoalBlackPasses(), config.smartCoalBlackBasecoatEnabled()));
+                sink.info(readiness("fake-click bucket-heavy gestures " + (config.smartFakeClickEnabled() ? "on" : "off"),
+                        config.smartFakeClickEnabled()));
                 sink.info(readiness("auto speed " + autoPainter.delayTicks(), autoPainter.delayTicks() == 5));
                 sink.info(readiness("auto drag fallback on", autoPainter.dragEnabled()));
                 sink.info(readiness("auto swap from inventory", config.autoSwapFromInventory()));
@@ -960,6 +963,38 @@ public final class HashCommandHandler {
                 + " requiresOffhandBucket=" + controller.exactEmptyBucketInOffhand() + ".");
     }
 
+    private void handleFakeClick(String[] parts, SessionController.MessageSink sink) {
+        if (parts.length != 2) {
+            sink.error("Usage: #painting fakeclick on|off|status");
+            return;
+        }
+        switch (parts[1].toLowerCase(Locale.ROOT)) {
+            case "on" -> {
+                configManager.setSmartFakeClickEnabled(true, text -> sink.error(text.getString()));
+                sink.info("Smart fake-click gestures enabled for repeated bucket-heavy images.");
+            }
+            case "off" -> {
+                configManager.setSmartFakeClickEnabled(false, text -> sink.error(text.getString()));
+                smartPainter.invalidateTrust("fake-click disabled");
+                sink.info("Smart fake-click gestures disabled. Bucket painting will continue normally.");
+            }
+            case "status" -> fakeClickStatus(sink);
+            default -> sink.error("Usage: #painting fakeclick on|off|status");
+        }
+    }
+
+    private void fakeClickStatus(SessionController.MessageSink sink) {
+        ConfigManager.Config config = configManager.config();
+        sink.info("Smart fake-click gestures enabled=" + config.smartFakeClickEnabled()
+                + " startsAfter=" + config.smartFakeClickStreakThreshold()
+                + " bucket-heavy image(s)"
+                + " dominanceThreshold=" + String.format(Locale.ROOT, "%.0f%%", config.smartFakeClickDominanceThreshold() * 100.0D)
+                + " maxDetailPixels=" + config.smartFakeClickMaxDetailPixels()
+                + " steps=" + config.smartFakeClickMinSteps() + "-" + config.smartFakeClickMaxSteps()
+                + " decoySwaps=" + config.smartFakeClickMinColorSwaps() + "-" + config.smartFakeClickMaxColorSwaps()
+                + " sameColorOnly=true.");
+    }
+
     private void smartPreview(SessionController.MessageSink sink) {
         SmartPreview preview = smartPainter.preview(configManager.config());
         if (preview == null) {
@@ -1112,7 +1147,7 @@ public final class HashCommandHandler {
     }
 
     private void usage(SessionController.MessageSink sink) {
-        sink.info("Usage: #painting help, gui, <file.png>, dryrun, palette ..., coalblack ..., batch ..., recovery ..., postpaint ..., rename ..., pv <1-40>, pv2 ..., auto full, stop, pause, resume, back, skip, goto, calibrate ..., usecalibration <name>, cal ...");
+        sink.info("Usage: #painting help, gui, <file.png>, dryrun, palette ..., coalblack ..., fakeclick ..., batch ..., recovery ..., postpaint ..., rename ..., pv <1-40>, pv2 ..., auto full, stop, pause, resume, back, skip, goto, calibrate ..., usecalibration <name>, cal ...");
     }
 
     private void openGui(SessionController.MessageSink sink) {
@@ -1147,6 +1182,9 @@ public final class HashCommandHandler {
         }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting coalblack")) {
             helpLine(sink, "#painting coalblack " + entry.command(), entry.description());
+        }
+        for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting fakeclick")) {
+            helpLine(sink, "#painting fakeclick " + entry.command(), entry.description());
         }
         for (CommandGuide.Entry entry : CommandGuide.suggestions("#painting palette")) {
             helpLine(sink, "#painting palette " + entry.command(), entry.description());

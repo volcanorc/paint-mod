@@ -51,7 +51,7 @@ class CommandGuideTest {
     void rootCompletionsCoverEveryImplementedNamedRootCommand() {
         Set<String> expected = Set.of("help", "gui", "paths", "set", "android", "dryrun", "palette", "batch",
                 "recovery", "postpaint", "rename", "pv", "pv2", "full", "auto", "smart", "bucket", "coalblack",
-                "calibrate", "calibration", "cal", "usecalibration", "status", "stop", "pause", "resume",
+                "fakeclick", "calibrate", "calibration", "cal", "usecalibration", "status", "stop", "pause", "resume",
                 "back", "skip", "reload", "goto", "pos", "confirm");
         Set<String> actual = CommandGuide.chatSuggestions("#painting ").stream()
                 .filter(CommandGuide.Completion::insertable)
@@ -78,6 +78,7 @@ class CommandGuideTest {
                 "aimdelay", "afterdelay", "restoredelay", "natural");
         assertInsertions("#painting bucket natural ", "on", "off", "status", "delay");
         assertInsertions("#painting coalblack ", "on", "off", "status", "passes");
+        assertInsertions("#painting fakeclick ", "on", "off", "status");
         assertInsertions("#painting calibrate ", "start", "continue", "resume", "save", "reset", "stop", "undo",
                 "status", "clear");
         assertInsertions("#painting calibration ", "portable");
