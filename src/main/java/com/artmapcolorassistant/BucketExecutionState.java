@@ -7,7 +7,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.TreeMap;
 
 final class BucketExecutionState {
     static final int MIN_RECENCY_COOLDOWN_STAGES = 4;
@@ -42,9 +41,12 @@ final class BucketExecutionState {
     private List<Integer> remainingFillClickAnchors = List.of();
     private List<Integer> activeAnchors = List.of();
     private int lastBucketAnchor = -1;
+    private int bucketActionCounter;
     private final Set<Integer> currentImageFillAnchors = new HashSet<>();
     private final Map<Integer, Integer> recentPointExpiresAt = new HashMap<>();
     private final Map<Integer, Integer> recentRowExpiresAt = new HashMap<>();
+    private final Map<Integer, Integer> recentFillPointExpiresAt = new HashMap<>();
+    private final Map<Integer, Integer> recentFillRowExpiresAt = new HashMap<>();
 
     BucketExecutionState() {
         this(new Random());
@@ -77,13 +79,16 @@ final class BucketExecutionState {
         fillClickOccurred = false;
         currentImageFillAnchors.clear();
         if (movementContextChanged) {
-            remainingFillClickAnchors = smoothFillOrder(this.fillClickAnchors);
+            remainingFillClickAnchors = shuffledCopy(this.fillClickAnchors);
             movementStageCounter = 0;
+            bucketActionCounter = 0;
             lastBucketAnchor = -1;
             recentPointExpiresAt.clear();
             recentRowExpiresAt.clear();
+            recentFillPointExpiresAt.clear();
+            recentFillRowExpiresAt.clear();
         } else if (remainingFillClickAnchors.isEmpty()) {
-            remainingFillClickAnchors = smoothFillOrder(this.fillClickAnchors);
+            remainingFillClickAnchors = shuffledCopy(this.fillClickAnchors);
         }
     }
 
@@ -178,30 +183,61 @@ final class BucketExecutionState {
 
     private int nextFillClickAnchor() {
         if (remainingFillClickAnchors.isEmpty()) {
-            remainingFillClickAnchors = smoothFillOrder(fillClickAnchors);
+            remainingFillClickAnchors = shuffledCopy(fillClickAnchors);
         }
-        int selectedIndex = firstQueuedFillClickCandidateIndex(true, true);
+        int selectedIndex = localFillClickCandidateIndex();
         if (selectedIndex < 0) {
-            selectedIndex = firstQueuedFillClickCandidateIndex(true, false);
-        }
-        if (selectedIndex < 0) {
-            selectedIndex = firstQueuedFillClickCandidateIndex(false, true);
+            selectedIndex = centralFillClickCandidateIndex();
         }
         if (selectedIndex < 0) {
-            selectedIndex = firstQueuedFillClickCandidateIndex(false, false);
-        }
-        if (selectedIndex < 0) {
-            selectedIndex = randomFillClickCandidateIndex();
+            selectedIndex = nearestRemainingFillClickCandidateIndex();
         }
         int anchor = remainingFillClickAnchors.get(selectedIndex);
         ArrayList<Integer> nextRemaining = new ArrayList<>(remainingFillClickAnchors);
         nextRemaining.remove(selectedIndex);
         remainingFillClickAnchors = List.copyOf(nextRemaining);
         currentImageFillAnchors.add(anchor);
+        rememberFill(anchor);
         return anchor;
     }
 
-    private int firstQueuedFillClickCandidateIndex(boolean avoidCurrentImageFill, boolean avoidLastBucketAnchor) {
+    private int localFillClickCandidateIndex() {
+        if (lastBucketAnchor < 0) {
+            return centralFillClickCandidateIndex();
+        }
+        int[][] windows = new int[][]{
+                {3, 5},
+                {4, 8},
+                {6, 10},
+                {8, 12},
+                {12, 16}
+        };
+        for (int[] window : windows) {
+            int index = bestFillClickCandidateIndex(window[0], window[1], true, true, true, true);
+            if (index >= 0) {
+                return index;
+            }
+        }
+        for (int[] window : windows) {
+            int index = bestFillClickCandidateIndex(window[0], window[1], true, true, true, false);
+            if (index >= 0) {
+                return index;
+            }
+        }
+        for (int[] window : windows) {
+            int index = bestFillClickCandidateIndex(window[0], window[1], true, false, false, false);
+            if (index >= 0) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private int bestFillClickCandidateIndex(int rowWindow, int columnWindow, boolean avoidCurrentImageFill,
+                                            boolean avoidLastBucketAnchor, boolean avoidRecentPoint,
+                                            boolean avoidRecentRow) {
+        ArrayList<Integer> bestIndexes = new ArrayList<>();
+        int bestScore = Integer.MAX_VALUE;
         for (int i = 0; i < remainingFillClickAnchors.size(); i++) {
             int anchor = remainingFillClickAnchors.get(i);
             if (avoidCurrentImageFill && currentImageFillAnchors.contains(anchor)) {
@@ -210,16 +246,88 @@ final class BucketExecutionState {
             if (avoidLastBucketAnchor && anchor == lastBucketAnchor) {
                 continue;
             }
-            return i;
+            if (avoidRecentPoint && isRecentFillPoint(anchor)) {
+                continue;
+            }
+            if (avoidRecentRow && isRecentFillRow(row(anchor))) {
+                continue;
+            }
+            if (lastBucketAnchor >= 0 && !withinWindow(anchor, lastBucketAnchor, rowWindow, columnWindow)) {
+                continue;
+            }
+            int score = lastBucketAnchor < 0 ? 0 : manhattanDistance(anchor, lastBucketAnchor);
+            if (score < bestScore) {
+                bestIndexes.clear();
+                bestScore = score;
+            }
+            if (score == bestScore || score <= bestScore + 2) {
+                bestIndexes.add(i);
+            }
         }
-        return -1;
+        return randomBestIndex(bestIndexes);
     }
 
-    private int randomFillClickCandidateIndex() {
-        if (remainingFillClickAnchors.size() == 1) {
-            return 0;
+    private int centralFillClickCandidateIndex() {
+        ArrayList<Integer> central = new ArrayList<>();
+        int minRow = fillClickAnchors.stream().mapToInt(this::row).min().orElse(0);
+        int maxRow = fillClickAnchors.stream().mapToInt(this::row).max().orElse(minRow);
+        int minColumn = fillClickAnchors.stream().mapToInt(this::column).min().orElse(0);
+        int maxColumn = fillClickAnchors.stream().mapToInt(this::column).max().orElse(minColumn);
+        int rowMargin = Math.max(1, (maxRow - minRow + 1) / 5);
+        int columnMargin = Math.max(1, (maxColumn - minColumn + 1) / 5);
+        int lowRow = minRow + rowMargin;
+        int highRow = maxRow - rowMargin;
+        int lowColumn = minColumn + columnMargin;
+        int highColumn = maxColumn - columnMargin;
+        for (int i = 0; i < remainingFillClickAnchors.size(); i++) {
+            int anchor = remainingFillClickAnchors.get(i);
+            if (currentImageFillAnchors.contains(anchor)) {
+                continue;
+            }
+            int row = row(anchor);
+            int column = column(anchor);
+            if (row >= lowRow && row <= highRow && column >= lowColumn && column <= highColumn) {
+                central.add(i);
+            }
         }
-        return random.nextInt(remainingFillClickAnchors.size());
+        if (!central.isEmpty()) {
+            return central.get(random.nextInt(central.size()));
+        }
+        return remainingFillClickAnchors.isEmpty() ? -1 : random.nextInt(remainingFillClickAnchors.size());
+    }
+
+    private int nearestRemainingFillClickCandidateIndex() {
+        if (remainingFillClickAnchors.isEmpty()) {
+            return -1;
+        }
+        if (lastBucketAnchor < 0) {
+            return random.nextInt(remainingFillClickAnchors.size());
+        }
+        ArrayList<Integer> bestIndexes = new ArrayList<>();
+        int bestScore = Integer.MAX_VALUE;
+        for (int i = 0; i < remainingFillClickAnchors.size(); i++) {
+            int anchor = remainingFillClickAnchors.get(i);
+            if (currentImageFillAnchors.contains(anchor) && remainingFillClickAnchors.size() > currentImageFillAnchors.size()) {
+                continue;
+            }
+            int score = manhattanDistance(anchor, lastBucketAnchor);
+            if (score < bestScore) {
+                bestIndexes.clear();
+                bestScore = score;
+            }
+            if (score == bestScore || score <= bestScore + 2) {
+                bestIndexes.add(i);
+            }
+        }
+        return randomBestIndex(bestIndexes);
+    }
+
+    private int randomBestIndex(List<Integer> indexes) {
+        if (indexes == null || indexes.isEmpty()) {
+            return -1;
+        }
+        int limit = Math.min(10, indexes.size());
+        return indexes.get(random.nextInt(limit));
     }
 
     private int chooseLocalLookAnchor(List<Integer> path, int referenceAnchor, int fillAnchor, int stage) {
@@ -258,6 +366,8 @@ final class BucketExecutionState {
                                        int fillAnchor, boolean avoidRecentPoint, boolean avoidRecentRow,
                                        int rowWindow, int columnWindow, boolean afterFill,
                                        boolean requireFillWindow) {
+        ArrayList<Integer> best = new ArrayList<>();
+        int bestScore = Integer.MAX_VALUE;
         for (int anchor : candidates) {
             if (path.contains(anchor)) {
                 continue;
@@ -284,9 +394,20 @@ final class BucketExecutionState {
             if (avoidRecentRow && isRecentRow(row)) {
                 continue;
             }
-            return anchor;
+            int score = manhattanDistance(anchor, fillAnchor);
+            if (referenceAnchor >= 0) {
+                score += manhattanDistance(anchor, referenceAnchor);
+            }
+            if (score < bestScore) {
+                best.clear();
+                bestScore = score;
+            }
+            if (score == bestScore || score <= bestScore + 2) {
+                best.add(anchor);
+            }
         }
-        return null;
+        int selected = randomBestAnchor(best);
+        return selected < 0 ? null : selected;
     }
 
     private int chooseAnchor(List<Integer> path) {
@@ -344,6 +465,14 @@ final class BucketExecutionState {
         return best == null ? chooseAnchor(path) : best;
     }
 
+    private int randomBestAnchor(List<Integer> anchors) {
+        if (anchors == null || anchors.isEmpty()) {
+            return -1;
+        }
+        int limit = Math.min(10, anchors.size());
+        return anchors.get(random.nextInt(limit));
+    }
+
     private boolean withinWindow(int anchor, int referenceAnchor, int rowWindow, int columnWindow) {
         return Math.abs(row(anchor) - row(referenceAnchor)) <= rowWindow
                 && Math.abs(column(anchor) - column(referenceAnchor)) <= columnWindow;
@@ -384,9 +513,24 @@ final class BucketExecutionState {
         expireOldEntries();
     }
 
+    private void rememberFill(int anchor) {
+        int cooldown = MIN_RECENCY_COOLDOWN_STAGES
+                + random.nextInt(MAX_RECENCY_COOLDOWN_STAGES - MIN_RECENCY_COOLDOWN_STAGES + 1);
+        int expiresAt = bucketActionCounter + cooldown + 1;
+        recentFillPointExpiresAt.put(anchor, expiresAt);
+        recentFillRowExpiresAt.put(row(anchor), expiresAt);
+        bucketActionCounter++;
+        expireOldFillEntries();
+    }
+
     private void expireOldEntries() {
         recentPointExpiresAt.entrySet().removeIf(entry -> entry.getValue() <= movementStageCounter);
         recentRowExpiresAt.entrySet().removeIf(entry -> entry.getValue() <= movementStageCounter);
+    }
+
+    private void expireOldFillEntries() {
+        recentFillPointExpiresAt.entrySet().removeIf(entry -> entry.getValue() <= bucketActionCounter);
+        recentFillRowExpiresAt.entrySet().removeIf(entry -> entry.getValue() <= bucketActionCounter);
     }
 
     private boolean isRecentPoint(int anchor) {
@@ -395,6 +539,14 @@ final class BucketExecutionState {
 
     private boolean isRecentRow(int row) {
         return recentRowExpiresAt.getOrDefault(row, -1) > movementStageCounter;
+    }
+
+    private boolean isRecentFillPoint(int anchor) {
+        return recentFillPointExpiresAt.getOrDefault(anchor, -1) > bucketActionCounter;
+    }
+
+    private boolean isRecentFillRow(int row) {
+        return recentFillRowExpiresAt.getOrDefault(row, -1) > bucketActionCounter;
     }
 
     private int row(int anchor) {
@@ -416,30 +568,4 @@ final class BucketExecutionState {
         return List.copyOf(copy);
     }
 
-    private List<Integer> smoothFillOrder(List<Integer> anchors) {
-        if (anchors == null || anchors.isEmpty()) {
-            return List.of();
-        }
-        TreeMap<Integer, List<Integer>> byRow = new TreeMap<>();
-        for (int anchor : anchors) {
-            byRow.computeIfAbsent(row(anchor), ignored -> new ArrayList<>()).add(anchor);
-        }
-        int minRow = byRow.firstKey();
-        int maxRow = byRow.lastKey();
-        boolean descending = lastBucketAnchor >= 0 && row(lastBucketAnchor) >= (minRow + maxRow) / 2;
-        ArrayList<Integer> ordered = new ArrayList<>(anchors.size());
-        List<Integer> rows = new ArrayList<>(byRow.keySet());
-        if (descending) {
-            rows = rows.reversed();
-        }
-        for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
-            List<Integer> rowAnchors = new ArrayList<>(byRow.get(rows.get(rowIndex)));
-            rowAnchors.sort((first, second) -> Integer.compare(column(first), column(second)));
-            if ((rowIndex % 2 == 1) != descending) {
-                rowAnchors = rowAnchors.reversed();
-            }
-            ordered.addAll(rowAnchors);
-        }
-        return List.copyOf(ordered);
-    }
 }

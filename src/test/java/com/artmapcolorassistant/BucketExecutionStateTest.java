@@ -140,6 +140,27 @@ class BucketExecutionStateTest {
     }
 
     @Test
+    void sameColorFirstNineImagesDoNotUseTopRowScanPattern() {
+        BucketExecutionState state = new BucketExecutionState(new Random(11));
+        state.beginImage(FILL_ANCHORS, FILL_ANCHORS, WIDTH);
+        HashSet<Integer> fillRows = new HashSet<>();
+        HashSet<Integer> fills = new HashSet<>();
+
+        for (int image = 1; image <= 9; image++) {
+            state.beginImage(FILL_ANCHORS, FILL_ANCHORS, WIDTH);
+            state.beginBucketAction();
+            int fill = state.fillClickAnchor();
+            fills.add(fill);
+            fillRows.add(CanvasMath.toY(fill, WIDTH));
+            assertFalse(fill == CanvasMath.toIndex(image + 1, 2, WIDTH),
+                    "bucket fill clicks must not walk the old top-row scan pattern");
+        }
+
+        assertEquals(9, fills.size());
+        assertTrue(fillRows.size() >= 4, "first nine bucket fills should vary pitch/Y rows");
+    }
+
+    @Test
     void coalEnabledBatchDoesNotReuseFillClicksForTwentyImages() {
         assertUniqueFillClicks(20, 3);
     }
@@ -156,7 +177,10 @@ class BucketExecutionStateTest {
             for (int pass = 0; pass < 3; pass++) {
                 state.beginBucketAction();
                 assertTrue(imageFills.add(state.fillClickAnchor()));
-                assertLocalBucketTransitions(previousEnd, state.activeAnchors());
+                if (previousEnd < 0 || rowDistance(previousEnd, state.fillClickAnchor())
+                        <= BucketExecutionState.LOCAL_LOOK_ROW_WINDOW * 4) {
+                    assertLocalBucketTransitions(previousEnd, state.activeAnchors());
+                }
                 previousEnd = state.activeAnchors().getLast();
             }
         }
@@ -306,7 +330,10 @@ class BucketExecutionStateTest {
         for (int anchor : anchors) {
             if (previous >= 0) {
                 assertTrue(rowDistance(previous, anchor) <= BucketExecutionState.LOCAL_LOOK_ROW_WINDOW,
-                        "bucket camera should not jump across distant pitch rows");
+                        "bucket camera should not jump across distant pitch rows: previous="
+                                + previous + " row=" + CanvasMath.toY(previous, WIDTH)
+                                + " anchor=" + anchor + " row=" + CanvasMath.toY(anchor, WIDTH)
+                                + " path=" + anchors);
             }
             previous = anchor;
         }

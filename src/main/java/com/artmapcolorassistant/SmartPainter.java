@@ -71,7 +71,7 @@ public final class SmartPainter {
                 + " bucket=single-initial-left-click"
                 + " bucketNatural=required"
                 + " delay=" + config.bucketNaturalDelayMinTicks() + "-" + config.bucketNaturalDelayMaxTicks() + "t"
-                + " path=natural-30"
+                + " path=human-walk-full-pool"
                 + " coalBlack=" + (preparedPlan != null && preparedPlan.preview().coalBlackPlanned())
                 + " coalPasses=" + (preparedPlan == null ? 0 : preparedPlan.preview().coalBlackPasses())
                 + " hands={" + controller.bucketHandStatus(dominant) + "}"
@@ -612,9 +612,11 @@ public final class SmartPainter {
         if (session == null) {
             return List.of();
         }
-        List<Integer> exactNatural = exactAnchors(plan.bucketAimAnchors(), config, Integer.MAX_VALUE);
-        if (exactNatural.size() >= SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS) {
-            return exactNatural;
+        List<Integer> exactInnerCanvas = exactAnchors(
+                SmartBucketAnchorPlanner.fillClickCandidates(config.canvasWidth(), config.canvasHeight()),
+                config, Integer.MAX_VALUE);
+        if (exactInnerCanvas.size() >= SmartBucketAnchorPlanner.NATURAL_TARGET_POINTS) {
+            return exactInnerCanvas;
         }
         return List.of();
     }
