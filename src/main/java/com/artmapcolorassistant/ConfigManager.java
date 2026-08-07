@@ -93,7 +93,7 @@ public final class ConfigManager {
         }
     }
 
-    private Config parse(JsonObject root) {
+    Config parse(JsonObject root) {
         Config defaults = Config.defaults();
         if (root == null) {
             return defaults;
@@ -189,6 +189,12 @@ public final class ConfigManager {
                 0.50D, 1.0D);
         int smartFakeClickMaxDetailPixels = Math.max(0,
                 intValue(root, "smartFakeClickMaxDetailPixels", defaults.smartFakeClickMaxDetailPixels));
+        if (hasLegacySmartFakeClickDefaults(root, smartFakeClickStreakThreshold,
+                smartFakeClickDominanceThreshold, smartFakeClickMaxDetailPixels)) {
+            smartFakeClickStreakThreshold = defaults.smartFakeClickStreakThreshold;
+            smartFakeClickDominanceThreshold = defaults.smartFakeClickDominanceThreshold;
+            smartFakeClickMaxDetailPixels = defaults.smartFakeClickMaxDetailPixels;
+        }
         int smartFakeClickMinSteps = Math.max(1,
                 intValue(root, "smartFakeClickMinSteps", defaults.smartFakeClickMinSteps));
         int smartFakeClickMaxSteps = Math.max(smartFakeClickMinSteps,
@@ -641,6 +647,17 @@ public final class ConfigManager {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    static boolean hasLegacySmartFakeClickDefaults(JsonObject root, int streakThreshold,
+                                                   double dominanceThreshold,
+                                                   int maxDetailPixels) {
+        return root.has("smartFakeClickStreakThreshold")
+                && root.has("smartFakeClickDominanceThreshold")
+                && root.has("smartFakeClickMaxDetailPixels")
+                && streakThreshold == SmartFakeClickState.LEGACY_DEFAULT_STREAK_THRESHOLD
+                && Math.abs(dominanceThreshold - SmartFakeClickState.LEGACY_DEFAULT_DOMINANCE_THRESHOLD) < 0.000001D
+                && maxDetailPixels == SmartFakeClickState.LEGACY_DEFAULT_MAX_DETAIL_PIXELS;
     }
 
     private static double clampDouble(double value, double min, double max) {
@@ -1259,7 +1276,13 @@ public final class ConfigManager {
                     true, 10, 2, true, 2, 0.55D, true, 10, 20, 16, 24, 10,
                     true, 10, 32, "ee", true, List.copyOf(overrides),
                     true, 5, true, true, 2, 0, 1, 500, "/pv 2", 2, 3, 20, 2, true, 5, 2, 4, null, null,
-                    true, 3, 0.90D, 64, 5, 10, 2, 3,
+                    true, SmartFakeClickState.DEFAULT_STREAK_THRESHOLD,
+                    SmartFakeClickState.DEFAULT_DOMINANCE_THRESHOLD,
+                    SmartFakeClickState.DEFAULT_MAX_DETAIL_PIXELS,
+                    SmartFakeClickState.DEFAULT_MIN_STEPS,
+                    SmartFakeClickState.DEFAULT_MAX_STEPS,
+                    SmartFakeClickState.DEFAULT_MIN_COLOR_SWAPS,
+                    SmartFakeClickState.DEFAULT_MAX_COLOR_SWAPS,
                     List.copyOf(colors), overrideResult.colors());
         }
     }

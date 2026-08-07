@@ -9,9 +9,12 @@ import java.util.Random;
 import java.util.Set;
 
 final class SmartFakeClickState {
-    static final int DEFAULT_STREAK_THRESHOLD = 3;
-    static final double DEFAULT_DOMINANCE_THRESHOLD = 0.90D;
-    static final int DEFAULT_MAX_DETAIL_PIXELS = 64;
+    static final int DEFAULT_STREAK_THRESHOLD = 1;
+    static final double DEFAULT_DOMINANCE_THRESHOLD = 1.0D;
+    static final int DEFAULT_MAX_DETAIL_PIXELS = 0;
+    static final int LEGACY_DEFAULT_STREAK_THRESHOLD = 3;
+    static final double LEGACY_DEFAULT_DOMINANCE_THRESHOLD = 0.90D;
+    static final int LEGACY_DEFAULT_MAX_DETAIL_PIXELS = 64;
     static final int DEFAULT_MIN_STEPS = 5;
     static final int DEFAULT_MAX_STEPS = 10;
     static final int DEFAULT_MIN_COLOR_SWAPS = 2;
@@ -59,35 +62,60 @@ final class SmartFakeClickState {
                     seed, seed, seed, ActionCostModel.manual(config), "fake-click decoy color swap"));
         }
 
-        int totalSteps = randomBetween(config.smartFakeClickMinSteps(), config.smartFakeClickMaxSteps());
-        int clickSteps = Math.min(totalSteps - 1, 1 + random.nextInt(Math.min(3, Math.max(1, totalSteps - 1))));
         Set<Integer> exact = new HashSet<>(exactAnchors);
-        for (int i = 0; i < clickSteps; i++) {
-            int index = nextTemplatePoint(exact, canvasWidth);
-            actions.add(new PaintAction(PaintActionType.MANUAL_CLICK, baseColor, baseColor.item(), List.of(index),
-                    index, index, index, ActionCostModel.manual(config), "same-color fake single click"));
-            lastGestureIndex = index;
-        }
-
-        int dragSteps = totalSteps - clickSteps;
-        if (dragSteps > 1) {
+        int totalSteps = randomBetween(config.smartFakeClickMinSteps(), config.smartFakeClickMaxSteps());
+        int remainingSteps = totalSteps;
+        if (totalSteps > 2) {
+            int dragSteps = Math.min(totalSteps - 1,
+                    2 + random.nextInt(Math.min(4, Math.max(1, totalSteps - 2))));
             List<Integer> run = nextTemplateRun(exact, dragSteps, canvasWidth);
+            if (run.size() <= 1 && dragSteps > 2) {
+                run = nextTemplateRun(exact, 2, canvasWidth);
+            }
             if (run.size() > 1) {
                 actions.add(new PaintAction(PaintActionType.DRAG_RUN, baseColor, baseColor.item(), run,
                         run.getFirst(), run.getFirst(), run.getLast(), ActionCostModel.drag(config, run.size()),
                         "same-color fake drag gesture"));
                 lastGestureIndex = run.getLast();
+                remainingSteps -= run.size();
             } else {
                 addFallbackClicks(actions, baseColor, config, exact, canvasWidth, dragSteps);
+                remainingSteps -= dragSteps;
             }
-        } else if (dragSteps == 1) {
-            addFallbackClicks(actions, baseColor, config, exact, canvasWidth, 1);
         }
+        addFallbackClicks(actions, baseColor, config, exact, canvasWidth, remainingSteps);
         return List.copyOf(actions);
     }
 
     int lastGestureIndex() {
         return lastGestureIndex;
+    }
+
+    int templatePathCursorForTesting() {
+        return templatePathCursor;
+    }
+
+    int templatePointCursorForTesting() {
+        return templatePointCursor;
+    }
+
+    int usedGesturePointsForTesting() {
+        return usedGesturePoints.size();
+    }
+
+    static int templatePointCountForTesting() {
+        return TEMPLATE_POINT_COUNT;
+    }
+
+    static boolean templateContainsForTesting(int index) {
+        for (int[] path : TEMPLATE_PATHS) {
+            for (int point : path) {
+                if (point == index) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void addFallbackClicks(List<PaintAction> actions, ArtMapColor baseColor, ConfigManager.Config config,
@@ -153,7 +181,8 @@ final class SmartFakeClickState {
                 int previous = -1;
                 for (int offset = 0; offset < path.length && run.size() < length; offset++) {
                     int point = path[(start + offset) % path.length];
-                    if (!exact.contains(point) || usedGesturePoints.contains(point) || !localEnough(point, canvasWidth)) {
+                    if (!exact.contains(point) || usedGesturePoints.contains(point) || run.contains(point)
+                            || !localEnough(point, canvasWidth)) {
                         run.clear();
                         previous = -1;
                         continue;
@@ -164,7 +193,7 @@ final class SmartFakeClickState {
                     run.add(point);
                     previous = point;
                 }
-                if (run.size() >= 2) {
+                if (run.size() >= length) {
                     templatePathCursor = Math.floorMod(templatePathCursor + pathOffset, TEMPLATE_PATHS.length);
                     templatePointCursor = (start + run.size()) % path.length;
                     for (int point : run) {
@@ -174,7 +203,14 @@ final class SmartFakeClickState {
                 }
             }
         }
-        return List.of(nextTemplatePoint(exact, canvasWidth));
+        List<Integer> localRun = nearestAdjacentRun(exact, length, canvasWidth);
+        if (localRun.size() >= length) {
+            for (int point : localRun) {
+                rememberGesturePoint(point, exact);
+            }
+            return localRun;
+        }
+        return List.of();
     }
 
     private boolean localEnough(int index, int canvasWidth) {
@@ -190,9 +226,7 @@ final class SmartFakeClickState {
         if (exact == null || exact.isEmpty()) {
             return 0;
         }
-        if (usedGesturePoints.size() >= exact.size()) {
-            usedGesturePoints.clear();
-        }
+        clearUsedIfExhausted(exact);
         int best = -1;
         int bestScore = Integer.MAX_VALUE;
         for (int point : exact) {
@@ -210,12 +244,64 @@ final class SmartFakeClickState {
         return best >= 0 ? best : exact.iterator().next();
     }
 
+    private List<Integer> nearestAdjacentRun(Set<Integer> exact, int length, int canvasWidth) {
+        if (exact == null || exact.isEmpty() || length < 2) {
+            return List.of();
+        }
+        clearUsedIfExhausted(exact);
+        ArrayList<Integer> starts = new ArrayList<>(exact);
+        starts.removeIf(point -> usedGesturePoints.contains(point) || !localEnough(point, canvasWidth));
+        starts.sort((left, right) -> Integer.compare(distanceFromLast(left, canvasWidth), distanceFromLast(right, canvasWidth)));
+        int limit = starts.size();
+        for (int i = 0; i < limit; i++) {
+            int start = starts.get(i);
+            ArrayList<Integer> directions = new ArrayList<>(List.of(1, -1, canvasWidth, -canvasWidth));
+            shuffle(directions);
+            for (int direction : directions) {
+                ArrayList<Integer> run = new ArrayList<>();
+                int previous = -1;
+                for (int step = 0; step < length; step++) {
+                    int point = start + direction * step;
+                    if (!exact.contains(point) || usedGesturePoints.contains(point) || run.contains(point)
+                            || !localEnough(point, canvasWidth)) {
+                        run.clear();
+                        break;
+                    }
+                    if (previous >= 0 && !adjacent(previous, point, canvasWidth)) {
+                        run.clear();
+                        break;
+                    }
+                    run.add(point);
+                    previous = point;
+                }
+                if (run.size() >= length) {
+                    return List.copyOf(run);
+                }
+            }
+        }
+        return List.of();
+    }
+
+    private int distanceFromLast(int point, int canvasWidth) {
+        if (lastGestureIndex < 0) {
+            return random.nextInt(8);
+        }
+        return Math.abs(CanvasMath.toY(point, canvasWidth) - CanvasMath.toY(lastGestureIndex, canvasWidth))
+                + Math.abs(CanvasMath.toX(point, canvasWidth) - CanvasMath.toX(lastGestureIndex, canvasWidth));
+    }
+
     private int rememberGesturePoint(int point, Set<Integer> exact) {
         if (exact != null && !exact.isEmpty() && usedGesturePoints.size() >= exact.size()) {
             usedGesturePoints.clear();
         }
         usedGesturePoints.add(point);
         return point;
+    }
+
+    private void clearUsedIfExhausted(Set<Integer> exact) {
+        if (exact != null && !exact.isEmpty() && usedGesturePoints.size() >= exact.size()) {
+            usedGesturePoints.clear();
+        }
     }
 
     private static boolean adjacent(int first, int second, int canvasWidth) {

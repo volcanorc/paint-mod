@@ -166,6 +166,11 @@ class BucketExecutionStateTest {
     }
 
     @Test
+    void coalEnabledBatchDoesNotReuseFillClicksForOneHundredImages() {
+        assertUniqueFillClicks(100, 3);
+    }
+
+    @Test
     void longCoalBlackBatchKeepsVisibleBucketCameraSmoothAcrossPoolExhaustion() {
         BucketExecutionState state = new BucketExecutionState(new Random(50005));
         state.beginImage(FILL_ANCHORS, FILL_ANCHORS, WIDTH);
@@ -216,10 +221,49 @@ class BucketExecutionStateTest {
                 assertTrue(rowDistance(previousEnd, state.activeAnchors().getFirst())
                                 <= BucketExecutionState.LOCAL_LOOK_ROW_WINDOW,
                         "new image should continue near the previous bucket endpoint");
+                assertTrue(columnDistance(previousEnd, state.activeAnchors().getFirst())
+                                <= BucketExecutionState.LOCAL_LOOK_COLUMN_WINDOW,
+                        "new image should continue near the previous bucket column");
             }
             assertTrue(maxConsecutiveRowJump(state.activeAnchors()) <= BucketExecutionState.LOCAL_LOOK_ROW_WINDOW);
+            assertTrue(maxConsecutiveColumnJump(state.activeAnchors()) <= BucketExecutionState.LOCAL_LOOK_COLUMN_WINDOW);
             previousEnd = state.activeAnchors().getLast();
         }
+    }
+
+    @Test
+    void sameColorBatchPrefersSmallerBucketWalkStepsWhenNearbyPointsExist() {
+        BucketExecutionState state = new BucketExecutionState(new Random(120));
+        state.beginImage(FILL_ANCHORS, FILL_ANCHORS, WIDTH);
+        int preferredRowTransitions = 0;
+        int preferredColumnTransitions = 0;
+        int totalTransitions = 0;
+
+        for (int image = 0; image < 100; image++) {
+            state.beginImage(FILL_ANCHORS, FILL_ANCHORS, WIDTH);
+            state.beginBucketAction();
+            assertTrue(maxConsecutiveRowJump(state.activeAnchors())
+                            <= BucketExecutionState.LOCAL_LOOK_ROW_WINDOW,
+                    "bucket look stages should stay inside the safe local row window: " + state.activeAnchors());
+            assertTrue(maxConsecutiveColumnJump(state.activeAnchors())
+                            <= BucketExecutionState.LOCAL_LOOK_COLUMN_WINDOW,
+                    "bucket look stages should stay inside the safe local column window: " + state.activeAnchors());
+            for (int i = 1; i < state.activeAnchors().size(); i++) {
+                totalTransitions++;
+                if (rowDistance(state.activeAnchors().get(i - 1), state.activeAnchors().get(i))
+                        <= BucketExecutionState.RELAXED_LOOK_ROW_WINDOW) {
+                    preferredRowTransitions++;
+                }
+                if (columnDistance(state.activeAnchors().get(i - 1), state.activeAnchors().get(i))
+                        <= BucketExecutionState.RELAXED_LOOK_COLUMN_WINDOW) {
+                    preferredColumnTransitions++;
+                }
+            }
+        }
+        assertTrue(preferredRowTransitions >= totalTransitions * 85 / 100,
+                "most bucket row movement should stay in the smoother 2-3 row walking window");
+        assertTrue(preferredColumnTransitions >= totalTransitions * 85 / 100,
+                "most bucket column movement should stay in the smoother 4-6 column walking window");
     }
 
     @Test
@@ -321,8 +365,20 @@ class BucketExecutionStateTest {
         return max;
     }
 
+    private int maxConsecutiveColumnJump(List<Integer> anchors) {
+        int max = 0;
+        for (int i = 1; i < anchors.size(); i++) {
+            max = Math.max(max, columnDistance(anchors.get(i - 1), anchors.get(i)));
+        }
+        return max;
+    }
+
     private int rowDistance(int first, int second) {
         return Math.abs(CanvasMath.toY(first, WIDTH) - CanvasMath.toY(second, WIDTH));
+    }
+
+    private int columnDistance(int first, int second) {
+        return Math.abs(CanvasMath.toX(first, WIDTH) - CanvasMath.toX(second, WIDTH));
     }
 
     private void assertLocalBucketTransitions(int previousEnd, List<Integer> anchors) {
@@ -333,6 +389,11 @@ class BucketExecutionStateTest {
                         "bucket camera should not jump across distant pitch rows: previous="
                                 + previous + " row=" + CanvasMath.toY(previous, WIDTH)
                                 + " anchor=" + anchor + " row=" + CanvasMath.toY(anchor, WIDTH)
+                                + " path=" + anchors);
+                assertTrue(columnDistance(previous, anchor) <= BucketExecutionState.LOCAL_LOOK_COLUMN_WINDOW,
+                        "bucket camera should not jump across distant columns: previous="
+                                + previous + " column=" + CanvasMath.toX(previous, WIDTH)
+                                + " anchor=" + anchor + " column=" + CanvasMath.toX(anchor, WIDTH)
                                 + " path=" + anchors);
             }
             previous = anchor;

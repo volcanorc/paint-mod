@@ -13,6 +13,10 @@ final class BucketExecutionState {
     static final int MAX_RECENCY_COOLDOWN_STAGES = 7;
     static final int LOCAL_FILL_ROW_WINDOW = 4;
     static final int LOCAL_FILL_COLUMN_WINDOW = 8;
+    static final int PREFERRED_LOOK_ROW_WINDOW = 2;
+    static final int PREFERRED_LOOK_COLUMN_WINDOW = 4;
+    static final int RELAXED_LOOK_ROW_WINDOW = 3;
+    static final int RELAXED_LOOK_COLUMN_WINDOW = 6;
     static final int LOCAL_LOOK_ROW_WINDOW = 4;
     static final int LOCAL_LOOK_COLUMN_WINDOW = 8;
     static final int STAGE_AFTER_SELECT_LOOK = 0;
@@ -334,7 +338,39 @@ final class BucketExecutionState {
         boolean afterFill = stage > STAGE_FILL_CLICK;
         boolean requireFillWindow = afterFill || referenceAnchor < 0 || stage == STAGE_AFTER_SWAP_LOOK;
         List<Integer> candidates = shuffledCopy(scriptedAnchors);
-        Integer best = firstLocalMatching(candidates, path, referenceAnchor, fillAnchor, true, true,
+        Integer best = chooseProgressiveBridgeAnchor(candidates, path, referenceAnchor, fillAnchor, stage, true, true);
+        if (best != null) {
+            return best;
+        }
+        best = chooseProgressiveBridgeAnchor(candidates, path, referenceAnchor, fillAnchor, stage, true, false);
+        if (best != null) {
+            return best;
+        }
+        best = chooseProgressiveBridgeAnchor(candidates, path, referenceAnchor, fillAnchor, stage, false, false);
+        if (best != null) {
+            return best;
+        }
+        best = firstLocalMatching(candidates, path, referenceAnchor, fillAnchor, true, true,
+                PREFERRED_LOOK_ROW_WINDOW, PREFERRED_LOOK_COLUMN_WINDOW, afterFill, requireFillWindow);
+        if (best != null) {
+            return best;
+        }
+        best = firstLocalMatching(candidates, path, referenceAnchor, fillAnchor, true, false,
+                PREFERRED_LOOK_ROW_WINDOW, PREFERRED_LOOK_COLUMN_WINDOW, afterFill, requireFillWindow);
+        if (best != null) {
+            return best;
+        }
+        best = firstLocalMatching(candidates, path, referenceAnchor, fillAnchor, true, true,
+                RELAXED_LOOK_ROW_WINDOW, RELAXED_LOOK_COLUMN_WINDOW, afterFill, requireFillWindow);
+        if (best != null) {
+            return best;
+        }
+        best = firstLocalMatching(candidates, path, referenceAnchor, fillAnchor, true, false,
+                RELAXED_LOOK_ROW_WINDOW, RELAXED_LOOK_COLUMN_WINDOW, afterFill, requireFillWindow);
+        if (best != null) {
+            return best;
+        }
+        best = firstLocalMatching(candidates, path, referenceAnchor, fillAnchor, true, true,
                 LOCAL_LOOK_ROW_WINDOW, LOCAL_LOOK_COLUMN_WINDOW, afterFill, requireFillWindow);
         if (best != null) {
             return best;
@@ -359,7 +395,85 @@ final class BucketExecutionState {
         if (best != null) {
             return best;
         }
+        best = nearestLocalBridgeAnchor(path, referenceAnchor, fillAnchor, stage);
+        if (best != null) {
+            return best;
+        }
         return nearestSafeAnchor(path, referenceAnchor, fillAnchor);
+    }
+
+    private Integer chooseProgressiveBridgeAnchor(List<Integer> candidates, List<Integer> path, int referenceAnchor,
+                                                  int fillAnchor, int stage, boolean avoidRecentPoint,
+                                                  boolean avoidRecentRow) {
+        if (stage >= STAGE_FILL_CLICK) {
+            return null;
+        }
+        int remainingTransitionsToFill = STAGE_FILL_CLICK - stage;
+        int maxRowsAfterThisStage = LOCAL_LOOK_ROW_WINDOW * remainingTransitionsToFill;
+        int maxColumnsAfterThisStage = LOCAL_LOOK_COLUMN_WINDOW * remainingTransitionsToFill;
+        ArrayList<Integer> best = new ArrayList<>();
+        int bestScore = Integer.MAX_VALUE;
+        for (int anchor : candidates) {
+            if (path.contains(anchor) || anchor == fillAnchor) {
+                continue;
+            }
+            if (referenceAnchor >= 0 && !withinWindow(anchor, referenceAnchor,
+                    LOCAL_LOOK_ROW_WINDOW, LOCAL_LOOK_COLUMN_WINDOW)) {
+                continue;
+            }
+            if (isFartherFromFill(anchor, referenceAnchor, fillAnchor)
+                    || isFartherFromFillRow(anchor, referenceAnchor, fillAnchor)) {
+                continue;
+            }
+            if (rowDistance(anchor, fillAnchor) > maxRowsAfterThisStage
+                    || columnDistance(anchor, fillAnchor) > maxColumnsAfterThisStage) {
+                continue;
+            }
+            if (avoidRecentPoint && isRecentPoint(anchor)) {
+                continue;
+            }
+            if (avoidRecentRow && isRecentRow(row(anchor))) {
+                continue;
+            }
+            int score = manhattanDistance(anchor, fillAnchor);
+            if (referenceAnchor >= 0) {
+                score += manhattanDistance(anchor, referenceAnchor);
+            }
+            if (score < bestScore) {
+                best.clear();
+                bestScore = score;
+            }
+            if (score == bestScore || score <= bestScore + 2) {
+                best.add(anchor);
+            }
+        }
+        int selected = randomBestAnchor(best);
+        return selected < 0 ? null : selected;
+    }
+
+    private Integer nearestLocalBridgeAnchor(List<Integer> path, int referenceAnchor, int fillAnchor, int stage) {
+        boolean beforeFillClick = stage < STAGE_FILL_CLICK;
+        boolean afterFillClick = stage > STAGE_FILL_CLICK;
+        Integer best = nearestSafeAnchor(path, referenceAnchor, fillAnchor,
+                LOCAL_LOOK_ROW_WINDOW, LOCAL_LOOK_COLUMN_WINDOW, true, true);
+        if (best != null) {
+            return best;
+        }
+        if (beforeFillClick && stage == STAGE_AFTER_SWAP_LOOK) {
+            best = nearestSafeAnchor(path, referenceAnchor, fillAnchor,
+                    LOCAL_LOOK_ROW_WINDOW, LOCAL_LOOK_COLUMN_WINDOW, false, true);
+            if (best != null) {
+                return best;
+            }
+        }
+        if (afterFillClick) {
+            best = nearestSafeAnchor(path, referenceAnchor, fillAnchor,
+                    LOCAL_LOOK_ROW_WINDOW, LOCAL_LOOK_COLUMN_WINDOW, true, false);
+            if (best != null) {
+                return best;
+            }
+        }
+        return null;
     }
 
     private Integer firstLocalMatching(List<Integer> candidates, List<Integer> path, int referenceAnchor,
@@ -465,6 +579,34 @@ final class BucketExecutionState {
         return best == null ? chooseAnchor(path) : best;
     }
 
+    private Integer nearestSafeAnchor(List<Integer> path, int referenceAnchor, int fillAnchor, int rowWindow,
+                                      int columnWindow, boolean requireReferenceWindow, boolean requireFillWindow) {
+        List<Integer> candidates = shuffledCopy(scriptedAnchors);
+        Integer best = null;
+        int bestScore = Integer.MAX_VALUE;
+        for (int anchor : candidates) {
+            if (path.contains(anchor) || anchor == fillAnchor) {
+                continue;
+            }
+            if (requireReferenceWindow && referenceAnchor >= 0
+                    && !withinWindow(anchor, referenceAnchor, rowWindow, columnWindow)) {
+                continue;
+            }
+            if (requireFillWindow && !withinWindow(anchor, fillAnchor, rowWindow, columnWindow)) {
+                continue;
+            }
+            int score = manhattanDistance(anchor, fillAnchor);
+            if (referenceAnchor >= 0) {
+                score += manhattanDistance(anchor, referenceAnchor);
+            }
+            if (score < bestScore) {
+                best = anchor;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
     private int randomBestAnchor(List<Integer> anchors) {
         if (anchors == null || anchors.isEmpty()) {
             return -1;
@@ -479,7 +621,15 @@ final class BucketExecutionState {
     }
 
     private int manhattanDistance(int first, int second) {
-        return Math.abs(row(first) - row(second)) + Math.abs(column(first) - column(second));
+        return rowDistance(first, second) + columnDistance(first, second);
+    }
+
+    private int rowDistance(int first, int second) {
+        return Math.abs(row(first) - row(second));
+    }
+
+    private int columnDistance(int first, int second) {
+        return Math.abs(column(first) - column(second));
     }
 
     private Integer firstMatching(List<Integer> candidates, List<Integer> path, boolean avoidRecentPoint,

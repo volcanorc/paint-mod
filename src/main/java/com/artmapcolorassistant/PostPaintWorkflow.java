@@ -24,6 +24,8 @@ import java.util.Set;
 public final class PostPaintWorkflow {
     private static final int SCREEN_TIMEOUT_TICKS = 120;
     private static final int ITEM_TIMEOUT_TICKS = 120;
+    private static final int POST_PAINT_SAVE_NEAR_RADIUS = 3;
+    private static final int POST_PAINT_PLACEMENT_NEAR_RADIUS = 3;
 
     private final MinecraftClient client;
     private final CalibrationManager calibrationManager;
@@ -187,7 +189,7 @@ public final class PostPaintWorkflow {
     }
 
     private void aimSaveTarget(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!aimAtConfiguredIndex(config, sink)) {
+        if (!aimAtSaveIndex(config, sink)) {
             return;
         }
         if (aimSettleTicks > 0) {
@@ -198,7 +200,7 @@ public final class PostPaintWorkflow {
     }
 
     private void rightClickSave(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!aimAtConfiguredIndex(config, sink)) {
+        if (!aimAtSaveIndex(config, sink)) {
             return;
         }
         rightClickAttempts++;
@@ -510,7 +512,7 @@ public final class PostPaintWorkflow {
     }
 
     private void placeBlankCanvas(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!aimAtConfiguredIndex(config, sink)) {
+        if (!aimAtPlacementIndex(config, sink)) {
             return;
         }
         rightClick();
@@ -562,7 +564,7 @@ public final class PostPaintWorkflow {
     }
 
     private void enterEasel(ConfigManager.Config config, SessionController.MessageSink sink) {
-        if (!aimAtConfiguredIndex(config, sink)) {
+        if (!aimAtPlacementIndex(config, sink)) {
             return;
         }
         rightClick();
@@ -571,13 +573,14 @@ public final class PostPaintWorkflow {
         sink.info("Post-paint setup complete.");
     }
 
-    private boolean aimAtConfiguredIndex(ConfigManager.Config config, SessionController.MessageSink sink) {
+    private boolean aimAtSaveIndex(ConfigManager.Config config, SessionController.MessageSink sink) {
         int total = config.canvasWidth() * config.canvasHeight();
         if (config.postPaintAimCalibrationIndex() < 0 || config.postPaintAimCalibrationIndex() >= total) {
             fail(sink, "postPaintAimCalibrationIndex must be 0-" + (total - 1) + ".");
             return false;
         }
-        for (int index : postPaintAimCandidates(config)) {
+        for (int index : postPaintSaveAimCandidates(config.canvasWidth(), config.canvasHeight(),
+                preferredAimIndex, config.postPaintAimCalibrationIndex())) {
             int x = CanvasMath.toX(index, config.canvasWidth());
             int y = CanvasMath.toY(index, config.canvasWidth());
             if (calibrationManager.aimAt(x, y, config)) {
@@ -589,35 +592,119 @@ public final class PostPaintWorkflow {
         return false;
     }
 
-    private List<Integer> postPaintAimCandidates(ConfigManager.Config config) {
-        ArrayList<Integer> candidates = new ArrayList<>();
+    private boolean aimAtPlacementIndex(ConfigManager.Config config, SessionController.MessageSink sink) {
         int total = config.canvasWidth() * config.canvasHeight();
+        if (config.postPaintAimCalibrationIndex() < 0 || config.postPaintAimCalibrationIndex() >= total) {
+            fail(sink, "postPaintAimCalibrationIndex must be 0-" + (total - 1) + ".");
+            return false;
+        }
+        for (int index : postPaintPlacementAimCandidates(config.canvasWidth(), config.canvasHeight(),
+                preferredAimIndex, config.postPaintAimCalibrationIndex())) {
+            int x = CanvasMath.toX(index, config.canvasWidth());
+            int y = CanvasMath.toY(index, config.canvasWidth());
+            if (calibrationManager.aimAt(x, y, config)) {
+                return true;
+            }
+        }
+        fail(sink, "Could not aim at a safe inner canvas placement point. Load exact calibration or choose an inner post-paint aim index.");
+        return false;
+    }
+
+    static List<Integer> postPaintSaveAimCandidates(int width, int height, int preferredAimIndex, int configuredIndex) {
+        ArrayList<Integer> candidates = new ArrayList<>();
+        int total = width * height;
         if (preferredAimIndex >= 0 && preferredAimIndex < total) {
-            int preferredX = CanvasMath.toX(preferredAimIndex, config.canvasWidth());
-            int preferredY = CanvasMath.toY(preferredAimIndex, config.canvasWidth());
-            for (int radius = 0; radius <= 3; radius++) {
-                for (int dy = -radius; dy <= radius; dy++) {
-                    for (int dx = -radius; dx <= radius; dx++) {
-                        if (Math.abs(dx) + Math.abs(dy) != radius) {
-                            continue;
-                        }
-                        int x = preferredX + dx;
-                        int y = preferredY + dy;
-                        if (x < 0 || y < 0 || x >= config.canvasWidth() || y >= config.canvasHeight()) {
-                            continue;
-                        }
-                        int candidate = CanvasMath.toIndex(x, y, config.canvasWidth());
-                        if (!candidates.contains(candidate)) {
-                            candidates.add(candidate);
-                        }
+            int preferredX = CanvasMath.toX(preferredAimIndex, width);
+            int preferredY = CanvasMath.toY(preferredAimIndex, width);
+            addDiamondCandidates(candidates, width, height, preferredX, preferredY, POST_PAINT_SAVE_NEAR_RADIUS,
+                    0, width - 1, 0, height - 1);
+        }
+        if (configuredIndex >= 0 && configuredIndex < total && !candidates.contains(configuredIndex)) {
+            candidates.add(configuredIndex);
+        }
+        return List.copyOf(candidates);
+    }
+
+    static List<Integer> postPaintPlacementAimCandidates(int width, int height, int preferredAimIndex, int configuredIndex) {
+        ArrayList<Integer> candidates = new ArrayList<>();
+        int total = width * height;
+        if (total <= 0) {
+            return List.of();
+        }
+        Bounds safe = placementBounds(width, height);
+        if (preferredAimIndex >= 0 && preferredAimIndex < total) {
+            int preferredX = CanvasMath.toX(preferredAimIndex, width);
+            int preferredY = CanvasMath.toY(preferredAimIndex, width);
+            int safeX = clamp(preferredX, safe.minX(), safe.maxX());
+            int safeY = clamp(preferredY, safe.minY(), safe.maxY());
+            addDiamondCandidates(candidates, width, height, safeX, safeY, POST_PAINT_PLACEMENT_NEAR_RADIUS,
+                    safe.minX(), safe.maxX(), safe.minY(), safe.maxY());
+        }
+        if (configuredIndex >= 0 && configuredIndex < total && isSafePlacementIndex(configuredIndex, width, height)
+                && !candidates.contains(configuredIndex)) {
+            candidates.add(configuredIndex);
+        }
+        int center = CanvasMath.toIndex((safe.minX() + safe.maxX()) / 2, (safe.minY() + safe.maxY()) / 2, width);
+        if (!candidates.contains(center)) {
+            candidates.add(center);
+        }
+        return List.copyOf(candidates);
+    }
+
+    static boolean isSafePlacementIndex(int index, int width, int height) {
+        if (index < 0 || index >= width * height) {
+            return false;
+        }
+        Bounds safe = placementBounds(width, height);
+        int x = CanvasMath.toX(index, width);
+        int y = CanvasMath.toY(index, width);
+        return x >= safe.minX() && x <= safe.maxX() && y >= safe.minY() && y <= safe.maxY();
+    }
+
+    private static void addDiamondCandidates(List<Integer> candidates, int width, int height, int centerX, int centerY,
+                                             int radius, int minX, int maxX, int minY, int maxY) {
+        for (int distance = 0; distance <= radius; distance++) {
+            for (int dy = -distance; dy <= distance; dy++) {
+                for (int dx = -distance; dx <= distance; dx++) {
+                    if (Math.abs(dx) + Math.abs(dy) != distance) {
+                        continue;
+                    }
+                    int x = centerX + dx;
+                    int y = centerY + dy;
+                    if (x < minX || y < minY || x > maxX || y > maxY || x >= width || y >= height) {
+                        continue;
+                    }
+                    int candidate = CanvasMath.toIndex(x, y, width);
+                    if (!candidates.contains(candidate)) {
+                        candidates.add(candidate);
                     }
                 }
             }
         }
-        if (!candidates.contains(config.postPaintAimCalibrationIndex())) {
-            candidates.add(config.postPaintAimCalibrationIndex());
+    }
+
+    private static Bounds placementBounds(int width, int height) {
+        int marginX = placementMargin(width);
+        int marginY = placementMargin(height);
+        return new Bounds(marginX, Math.max(marginX, width - 1 - marginX),
+                marginY, Math.max(marginY, height - 1 - marginY));
+    }
+
+    private static int placementMargin(int size) {
+        if (size >= 16) {
+            return 4;
         }
-        return List.copyOf(candidates);
+        if (size >= 8) {
+            return 2;
+        }
+        return size >= 3 ? 1 : 0;
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private record Bounds(int minX, int maxX, int minY, int maxY) {
     }
 
     private void clickScreenPoint(Screen screen, RecordedClickPoint point) {
