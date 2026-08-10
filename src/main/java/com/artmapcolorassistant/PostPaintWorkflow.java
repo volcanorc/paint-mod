@@ -19,16 +19,18 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 
 public final class PostPaintWorkflow {
     private static final int SCREEN_TIMEOUT_TICKS = 120;
     private static final int ITEM_TIMEOUT_TICKS = 120;
-    private static final int POST_PAINT_SAVE_NEAR_RADIUS = 3;
-    private static final int POST_PAINT_PLACEMENT_NEAR_RADIUS = 3;
+    private static final int POST_PAINT_CENTER_RADIUS = 6;
+    private static final int POST_PAINT_CENTER_WALK_MAX_STEP = 3;
 
     private final MinecraftClient client;
     private final CalibrationManager calibrationManager;
+    private final CenterAimTargetPool centerAimTargets = new CenterAimTargetPool(new Random());
     private boolean active;
     private int imageNumber;
     private String suffix = "";
@@ -41,6 +43,9 @@ public final class PostPaintWorkflow {
     private int funJumpGapTicksRemaining;
     private int overflowClearAttempts;
     private int preferredAimIndex = -1;
+    private int centerAimTargetIndex = -1;
+    private List<Integer> centerAimWalkPath = List.of();
+    private int centerAimWalkOffset;
     private boolean funJumpKeyHeld;
     private ItemStack pendingVaultTransferStack = ItemStack.EMPTY;
     private Phase phase = Phase.IDLE;
@@ -80,6 +85,7 @@ public final class PostPaintWorkflow {
         this.overflowClearAttempts = 0;
         this.funJumpKeyHeld = false;
         this.pendingVaultTransferStack = ItemStack.EMPTY;
+        resetCurrentCenterAim();
         this.phase = Phase.SELECT_SAVE_ITEM;
         sink.info("Post-paint automation started for save name \"" + saveName() + "\".");
     }
@@ -96,8 +102,14 @@ public final class PostPaintWorkflow {
         funJumpGapTicksRemaining = 0;
         overflowClearAttempts = 0;
         preferredAimIndex = -1;
+        resetCurrentCenterAim();
         pendingVaultTransferStack = ItemStack.EMPTY;
         phase = Phase.IDLE;
+    }
+
+    void resetCenterAimMemory() {
+        centerAimTargets.reset();
+        resetCurrentCenterAim();
     }
 
     public Result tick(ConfigManager.Config config, SessionController.MessageSink sink) {
@@ -574,81 +586,133 @@ public final class PostPaintWorkflow {
     }
 
     private boolean aimAtSaveIndex(ConfigManager.Config config, SessionController.MessageSink sink) {
-        int total = config.canvasWidth() * config.canvasHeight();
-        if (config.postPaintAimCalibrationIndex() < 0 || config.postPaintAimCalibrationIndex() >= total) {
-            fail(sink, "postPaintAimCalibrationIndex must be 0-" + (total - 1) + ".");
-            return false;
-        }
-        for (int index : postPaintSaveAimCandidates(config.canvasWidth(), config.canvasHeight(),
-                preferredAimIndex, config.postPaintAimCalibrationIndex())) {
-            int x = CanvasMath.toX(index, config.canvasWidth());
-            int y = CanvasMath.toY(index, config.canvasWidth());
-            if (calibrationManager.aimAt(x, y, config)) {
-                return true;
-            }
-        }
-        fail(sink, "Could not aim near the last painted point or at calibration index "
-                + config.postPaintAimCalibrationIndex() + ". Load exact calibration or choose another index.");
-        return false;
+        return aimAtCenterIndex(config, sink, "save");
     }
 
     private boolean aimAtPlacementIndex(ConfigManager.Config config, SessionController.MessageSink sink) {
-        int total = config.canvasWidth() * config.canvasHeight();
-        if (config.postPaintAimCalibrationIndex() < 0 || config.postPaintAimCalibrationIndex() >= total) {
-            fail(sink, "postPaintAimCalibrationIndex must be 0-" + (total - 1) + ".");
+        return aimAtCenterIndex(config, sink, "placement");
+    }
+
+    private boolean aimAtCenterIndex(ConfigManager.Config config, SessionController.MessageSink sink, String purpose) {
+        if (!prepareCenterAim(config, sink)) {
             return false;
         }
-        for (int index : postPaintPlacementAimCandidates(config.canvasWidth(), config.canvasHeight(),
-                preferredAimIndex, config.postPaintAimCalibrationIndex())) {
+        while (centerAimWalkOffset < centerAimWalkPath.size()) {
+            int index = centerAimWalkPath.get(centerAimWalkOffset);
             int x = CanvasMath.toX(index, config.canvasWidth());
             int y = CanvasMath.toY(index, config.canvasWidth());
-            if (calibrationManager.aimAt(x, y, config)) {
+            if (!calibrationManager.aimAt(x, y, config)) {
+                centerAimWalkOffset++;
+                continue;
+            }
+            if (centerAimWalkOffset < centerAimWalkPath.size() - 1) {
+                centerAimWalkOffset++;
+                return false;
+            }
+            if (index == centerAimTargetIndex) {
                 return true;
             }
+            centerAimWalkOffset++;
         }
-        fail(sink, "Could not aim at a safe inner canvas placement point. Load exact calibration or choose an inner post-paint aim index.");
+        fail(sink, "Could not aim at a center-zone post-paint " + purpose
+                + " point. Load exact calibration for the canvas center area.");
         return false;
     }
 
+    private boolean prepareCenterAim(ConfigManager.Config config, SessionController.MessageSink sink) {
+        if (centerAimTargetIndex >= 0 && !centerAimWalkPath.isEmpty()) {
+            return true;
+        }
+        List<Integer> centerCandidates = postPaintCenterAimCandidates(config.canvasWidth(), config.canvasHeight());
+        if (centerCandidates.isEmpty()) {
+            fail(sink, "No center-zone post-paint aim points are available for this canvas size.");
+            return false;
+        }
+        centerAimTargetIndex = nextCenterAimTarget(config.canvasWidth(), config.canvasHeight());
+        if (centerAimTargetIndex < 0) {
+            fail(sink, "No center-zone post-paint aim target could be selected for this canvas size.");
+            return false;
+        }
+        int startIndex = postPaintStartAimIndex(config.canvasWidth(), config.canvasHeight(),
+                preferredAimIndex, config.postPaintAimCalibrationIndex(), centerAimTargetIndex);
+        centerAimWalkPath = postPaintCenterWalkPath(config.canvasWidth(), config.canvasHeight(),
+                startIndex, centerAimTargetIndex);
+        centerAimWalkOffset = 0;
+        if (centerAimWalkPath.isEmpty()) {
+            fail(sink, "No center-zone post-paint aim path could be built for this canvas size.");
+            return false;
+        }
+        return true;
+    }
+
+    private int nextCenterAimTarget(int width, int height) {
+        return centerAimTargets.next(width, height);
+    }
+
+    private void resetCurrentCenterAim() {
+        centerAimTargetIndex = -1;
+        centerAimWalkPath = List.of();
+        centerAimWalkOffset = 0;
+    }
+
     static List<Integer> postPaintSaveAimCandidates(int width, int height, int preferredAimIndex, int configuredIndex) {
-        ArrayList<Integer> candidates = new ArrayList<>();
-        int total = width * height;
-        if (preferredAimIndex >= 0 && preferredAimIndex < total) {
-            int preferredX = CanvasMath.toX(preferredAimIndex, width);
-            int preferredY = CanvasMath.toY(preferredAimIndex, width);
-            addDiamondCandidates(candidates, width, height, preferredX, preferredY, POST_PAINT_SAVE_NEAR_RADIUS,
-                    0, width - 1, 0, height - 1);
-        }
-        if (configuredIndex >= 0 && configuredIndex < total && !candidates.contains(configuredIndex)) {
-            candidates.add(configuredIndex);
-        }
-        return List.copyOf(candidates);
+        return postPaintCenterAimCandidates(width, height);
     }
 
     static List<Integer> postPaintPlacementAimCandidates(int width, int height, int preferredAimIndex, int configuredIndex) {
+        return postPaintCenterAimCandidates(width, height);
+    }
+
+    static List<Integer> postPaintCenterAimCandidates(int width, int height) {
         ArrayList<Integer> candidates = new ArrayList<>();
         int total = width * height;
         if (total <= 0) {
             return List.of();
         }
         Bounds safe = placementBounds(width, height);
-        if (preferredAimIndex >= 0 && preferredAimIndex < total) {
-            int preferredX = CanvasMath.toX(preferredAimIndex, width);
-            int preferredY = CanvasMath.toY(preferredAimIndex, width);
-            int safeX = clamp(preferredX, safe.minX(), safe.maxX());
-            int safeY = clamp(preferredY, safe.minY(), safe.maxY());
-            addDiamondCandidates(candidates, width, height, safeX, safeY, POST_PAINT_PLACEMENT_NEAR_RADIUS,
+        for (int centerY : centerCoordinates(height)) {
+            for (int centerX : centerCoordinates(width)) {
+                addDiamondCandidates(candidates, width, height, centerX, centerY, POST_PAINT_CENTER_RADIUS,
                     safe.minX(), safe.maxX(), safe.minY(), safe.maxY());
-        }
-        if (configuredIndex >= 0 && configuredIndex < total && isSafePlacementIndex(configuredIndex, width, height)
-                && !candidates.contains(configuredIndex)) {
-            candidates.add(configuredIndex);
-        }
-        int center = CanvasMath.toIndex((safe.minX() + safe.maxX()) / 2, (safe.minY() + safe.maxY()) / 2, width);
-        if (!candidates.contains(center)) {
-            candidates.add(center);
+            }
         }
         return List.copyOf(candidates);
+    }
+
+    static List<Integer> postPaintCenterWalkPath(int width, int height, int startIndex, int targetIndex) {
+        int total = width * height;
+        if (width <= 0 || height <= 0 || targetIndex < 0 || targetIndex >= total) {
+            return List.of();
+        }
+        ArrayList<Integer> path = new ArrayList<>();
+        int currentX = startIndex >= 0 && startIndex < total ? CanvasMath.toX(startIndex, width) : CanvasMath.toX(targetIndex, width);
+        int currentY = startIndex >= 0 && startIndex < total ? CanvasMath.toY(startIndex, width) : CanvasMath.toY(targetIndex, width);
+        int targetX = CanvasMath.toX(targetIndex, width);
+        int targetY = CanvasMath.toY(targetIndex, width);
+        int safety = Math.max(width, height) * 2 + 4;
+        while ((currentX != targetX || currentY != targetY) && safety-- > 0) {
+            currentX += clamp(targetX - currentX, -POST_PAINT_CENTER_WALK_MAX_STEP, POST_PAINT_CENTER_WALK_MAX_STEP);
+            currentY += clamp(targetY - currentY, -POST_PAINT_CENTER_WALK_MAX_STEP, POST_PAINT_CENTER_WALK_MAX_STEP);
+            int index = CanvasMath.toIndex(currentX, currentY, width);
+            if (path.isEmpty() || path.getLast() != index) {
+                path.add(index);
+            }
+        }
+        if (path.isEmpty() || path.getLast() != targetIndex) {
+            path.add(targetIndex);
+        }
+        return List.copyOf(path);
+    }
+
+    static int postPaintStartAimIndex(int width, int height, int preferredAimIndex, int configuredIndex, int targetIndex) {
+        int total = width * height;
+        if (preferredAimIndex >= 0 && preferredAimIndex < total) {
+            return preferredAimIndex;
+        }
+        if (configuredIndex >= 0 && configuredIndex < total) {
+            return configuredIndex;
+        }
+        return targetIndex;
     }
 
     static boolean isSafePlacementIndex(int index, int width, int height) {
@@ -659,6 +723,22 @@ public final class PostPaintWorkflow {
         int x = CanvasMath.toX(index, width);
         int y = CanvasMath.toY(index, width);
         return x >= safe.minX() && x <= safe.maxX() && y >= safe.minY() && y <= safe.maxY();
+    }
+
+    static boolean isCenterZoneAimIndex(int index, int width, int height) {
+        return postPaintCenterAimCandidates(width, height).contains(index);
+    }
+
+    private static List<Integer> centerCoordinates(int size) {
+        if (size <= 0) {
+            return List.of();
+        }
+        int high = size / 2;
+        int low = Math.max(0, high - 1);
+        if (low == high) {
+            return List.of(high);
+        }
+        return List.of(low, high);
     }
 
     private static void addDiamondCandidates(List<Integer> candidates, int width, int height, int centerX, int centerY,
@@ -705,6 +785,31 @@ public final class PostPaintWorkflow {
     }
 
     private record Bounds(int minX, int maxX, int minY, int maxY) {
+    }
+
+    static final class CenterAimTargetPool {
+        private final Random random;
+        private final ArrayList<Integer> remaining = new ArrayList<>();
+
+        CenterAimTargetPool(Random random) {
+            this.random = random == null ? new Random() : random;
+        }
+
+        int next(int width, int height) {
+            if (remaining.isEmpty()) {
+                remaining.addAll(postPaintCenterAimCandidates(width, height));
+                Collections.shuffle(remaining, random);
+            }
+            return remaining.isEmpty() ? -1 : remaining.removeFirst();
+        }
+
+        void reset() {
+            remaining.clear();
+        }
+
+        int remainingForTesting() {
+            return remaining.size();
+        }
     }
 
     private void clickScreenPoint(Screen screen, RecordedClickPoint point) {

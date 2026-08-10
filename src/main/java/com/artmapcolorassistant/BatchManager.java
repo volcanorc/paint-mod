@@ -286,6 +286,7 @@ public final class BatchManager {
 
     private void stopSilently() {
         postPaintWorkflow.stop();
+        postPaintWorkflow.resetCenterAimMemory();
         active = false;
         paintingActive = false;
         waitingForSetup = false;
